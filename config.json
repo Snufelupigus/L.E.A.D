@@ -1,0 +1,14 @@
+{
+    "API": {
+        "GOOGLE_SCRIPT_URL": "Link Here"
+    },
+    "SERIAL": {
+        "PORT": "Your COM Port",
+        "BAUDRATE": 9600,
+        "TIMEOUT": 1
+    },
+    "FILES": {
+        "COMPONENT_CATALOGUE": "component_catalogue.json",
+        "CHANGELOG": "changelog.txt"
+    }
+}
