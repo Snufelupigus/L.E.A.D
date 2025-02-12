@@ -4,6 +4,13 @@ The LED Enabled Automated Database is an electronics sorting program that integr
 # Brief Overview
 L.E.A.D. is a free, open source project designed to simplify the management of electronic component inventories. By seamlessly integrating the Digikey API, L.E.A.D. automatically fetches up-to-date component details, so you don't have to spend hours entering data manually. With its built-in LED-based visual tracking, locating parts in your storage becomes as simple as a glance. Developed with a focus on minimal setup and maximum flexibility, L.E.A.D. is perfect for makers, hobbyists, and professionals who want a hassle-free, community-driven solution for their inventory challenges. Contributions and customizations are warmly welcomed as the project evolves.
 
+# Features
++ Digikey API Search
++ Component Cataloguing
++ Component Search
++ Physical output to integrate into physical location tracking
++ Barcode Scanning
+
 # How It Works
 ## Google Web App & DigiKey API Integration
 The system interfaces with DigiKey’s API via a Google Web App. When a user inputs a part number, L.E.A.D. sends a request to the Google Web App, which acts as a bridge between the software and DigiKey's API. The response includes detailed product information such as pricing, stock availability, manufacturer details, and datasheets. This data is then stored in the component catalog for future reference.
@@ -26,6 +33,15 @@ Bulk operations allow for scanning and adding multiple parts at once.
 
 # Setup
 This guide will walk you through downloading the code from GitHub, setting up a Google Apps Script for API communication, getting a DigiKey API key, and configuring the config file to link everything together.
+
+## Downloading and Running Program
+This is a basic overview on downloading and running the program. This is for begginers feel free to ignore.
+
+### Dowloading From GitHub
+1. Click on the Code button near the top right of the page
+2. Select Download zip
+3. Extract the zip file
+4. Run the main file to start the program
 
 ## Digikey API
 To interact with DigiKey's API, you need an API key.
@@ -53,15 +69,12 @@ The Google Apps Script acts as a bridge between your Python application and Digi
 ![image](https://github.com/user-attachments/assets/1192769b-a223-4f01-8827-9c9283761515)
 ![image](https://github.com/user-attachments/assets/cf9f7677-46c9-4e79-bc68-a46394e17f38)
 5. Select "Deploy" in the top right and click "New Deployment"
-6. Click on Select Type 
-Paste the Provided Apps Script Code:
+6. Click on "Select Type" and then click "Web App"
+7. Make sure that "Execute As" is set to me, and "Who Has Access" is set to Anyone
+8. Copy the Web App link and paste it into the provided space in the config.json file
 
-Open the Apps Script editor and delete any default code.
-Copy and paste the following script:
-javascript
-Copy
-Edit
-
+# Using L.E.A.D.
+After opening the program you are left on a main menu page that lists types of components in the system. As well as any that have reached low stock. Your main navigation is throught the navigation button at the top left, the Add menu allows you to manually add components and they're data. Alternatively you can scan in a barcode. The search menu is fairly self explanitory. In the add and search menues you can double click to ecit or highlight a component.
 
 
 
