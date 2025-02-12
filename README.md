@@ -58,7 +58,7 @@ Create a DigiKey Developer Account:
 4. Name you App and enable "ProductInformation V4"
 5. Save and go to view tab here you will find your Client Id and Client Secret. Save these as they are needed for the your app script
 
-## Googel Web App
+## Google Web App
 The Google Apps Script acts as a bridge between your Python application and DigiKey’s API, allowing you to fetch component data.
 
 ### Create and Deploy the Google Web App
