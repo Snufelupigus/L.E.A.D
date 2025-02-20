@@ -1,5 +1,8 @@
 import json
+from tkinter import messagebox
 import os
+import time
+from collections import OrderedDict
 import datetime
 
 class Backend:
@@ -10,6 +13,13 @@ class Backend:
         self.components = []
         self.load_components()
         self.max_leds = 300
+        self.undo_stack = []
+
+        self.cache_dir = os.path.join(script_dir, "image_cache")
+        if not os.path.exists(self.cache_dir):
+            os.makedirs(self.cache_dir)
+        # OrderedDict to store {photo_url: (file_path, timestamp)}
+        self.image_cache = OrderedDict()
 
     def load_components(self):
         try:
@@ -82,6 +92,15 @@ class Backend:
             else:
                 component["part_info"]["location"] = "N/A"  # Or raise an error
 
+        else:
+            #Check for duplicate locations
+            location = location.upper()
+            assigned = self.get_assigned_locations()
+            if location in assigned:
+                # Location is already taken.
+                messagebox.showerror("Location Error", f"Location {location} is already assigned to another component.")
+                raise Exception(f"Location {location} is already assigned to another component.")
+        
         # (Optional) Check for duplicates and update count if needed.
         duplicate_index = None
         for i, comp in enumerate(self.components):
@@ -125,6 +144,7 @@ class Backend:
     def delete_component(self, index):
         if 0 <= index < len(self.components):
             removed = self.components.pop(index)
+            self.undo_stack.append((removed, index))
             self.save_components()
             removed_part = removed["part_info"].get("part_number", "Unknown")
             self.log_change(f"Deleted component at index {index} (Part Number: {removed_part}).")
@@ -156,9 +176,6 @@ class Backend:
             "count": count,
         }
         return parsed_data
-
-#Begining([)>06P) Digikey #(455-1135-1-ND) 1P Manufacturer # (SXH-001T-P0.6) 30P Digikey # (455-1135-1-ND) K1K 90743192 10K 1097944959D2024.091T40380411K14LCN Quantity(Q20) 11ZPICK12Z52737013Z99999920Z0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-#[)>06P455-1135-1-ND1PSXH-001T-P0.630P455-1135-1-NDK1K9074319210K1097944959D2024.091T40380411K14LCNQ2011ZPICK12Z52737013Z99999920Z0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 
     def check_duplicate(self, component):
         new_part_number = component["part_number"].strip().lower()
@@ -254,3 +271,21 @@ class Backend:
                 })
         self.save_components()  # Save updated inventory.
         return results
+    
+    def undo_delete(self):
+        """
+        Restores the last deleted component, if available.
+        Returns True if successful, or False if there is nothing to undo.
+        """
+        if self.undo_stack:
+            component, index = self.undo_stack.pop()
+            # Insert the component back at its original index.
+            if index >= len(self.components):
+                self.components.append(component)
+            else:
+                self.components.insert(index, component)
+            self.save_components()
+            part_number = component["part_info"].get("part_number", "Unknown")
+            self.log_change(f"Restored component at index {index} (Part Number: {part_number}).")
+            return True
+        return False

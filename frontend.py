@@ -2,6 +2,10 @@ from tkinter import Tk, Label, Entry, Button, Canvas, StringVar, OptionMenu,  Me
 from tkinter.ttk import Treeview, Combobox
 from tkinter.messagebox import askyesno
 from tkinter.filedialog import asksaveasfilename, askopenfilename
+
+import time
+from PIL import Image, ImageTk
+from io import BytesIO
 import webbrowser
 
 class Frontend:
@@ -16,6 +20,7 @@ class Frontend:
         self.root.title("Component Catalogue")
         self.root.geometry("1250x750")
         self.create_menu()
+        self.root.focus_force()
 
         # Start with the home page
         self.show_home()
@@ -30,6 +35,14 @@ class Frontend:
         nav_menu.add_command(label="Search", command=self.show_search)
         nav_menu.add_command(label="Add", command=self.show_add)
         menu_bar.add_cascade(label="Navigation", menu=nav_menu)
+
+        self.root.config(menu=menu_bar)
+
+        edit_menu = Menu(menu_bar, tearoff=0)
+        edit_menu.add_command(label="Undo", command=self.undo_last_deletion)
+        #edit_menu.add_command(label="Redo", command=self.show_search)
+        #edit_menu.add_command(label="Edit", command=self.show_add)
+        menu_bar.add_cascade(label="Tools", menu=edit_menu)
 
         self.root.config(menu=menu_bar)
 
@@ -54,7 +67,7 @@ class Frontend:
 
         Button(self.current_frame, text="Export Low Stock Data", command=self.export_low_stock_data).pack(pady=10)
 
-        Button(self.current_frame, text="Process BOM File", command=self.show_bom_file_window).pack(padx=10)
+        Button(self.current_frame, text="Process BOM File", command=self.process_bom_file).pack(padx=10)
 
         # Create a Treeview to show low-stock items.
         low_stock_tree = Treeview(self.current_frame, columns=("Digikey", "Count", "LowStock", "ProductURL"), show="headings")
@@ -180,16 +193,6 @@ class Frontend:
         self.current_frame.columnconfigure(4, weight=1)
         self.current_frame.columnconfigure(5, weight=1)
 
-        """
-        styled_column = Frame(
-            self.current_frame,
-            bd=2,  # Border width
-            relief="groove",  # Border style (try: flat, raised, sunken, ridge, groove)
-            bg="#ff0000"  # Background color
-        )
-        styled_column.grid(row=0, column=3, rowspan=10, sticky="nswe", padx=10, pady=10)
-        """
-
         component_type_var = StringVar()
         component_type_var.set("Other")  # Default value
 
@@ -197,19 +200,6 @@ class Frontend:
             "Cable", "Capacitor", "Connector", "Crystal", "Diode", "Evaluation", "Hardware", "IC", "Inductor",
             "Kit", "LED", "Module", "Other", "Relay", "Resistor", "Sensor", "Switch", "Transformer", "Transistor"
         ]
-
-        def update_autocomplete(event, combobox, options):
-            """Dynamically filters dropdown based on user input."""
-            typed_text = combobox.get().lower()  # Get the current text in the entry field
-            if not typed_text:  # If empty, restore full options
-                combobox['values'] = options
-                return
-            
-            # Filter options that match typed text
-            filtered_options = [option for option in options if typed_text in option.lower()]
-            
-            # Update dropdown options
-            combobox['values'] = filtered_options
 
         for row, (key, (label_widget, entry_widget)) in enumerate(fields.items(), start=1):
             label_widget.grid(row=row, column=0, padx=5, pady=5, sticky="w")
@@ -323,6 +313,7 @@ class Frontend:
                     else:
                         return
                 else:
+                    #found digikey component
                     if response:
                         if part_number is None:
                             response["part_info"]["count"] = component_data["count"]
@@ -492,8 +483,8 @@ class Frontend:
             update_add_tree()
 
         Button(self.current_frame, text="Add Component", command=add_component).grid(row=len(fields), column=0, columnspan=2, pady=5, padx=10, sticky= "w")
-        Button(self.current_frame, text="Add Barcode", command=barcode_scan).grid(row=len(fields), column=5, columnspan=2, pady=5)
-        Button(self.current_frame, text="Bulk Scan", command=lambda: bulk_add(self)).grid(row=len(fields)-1, column=5, columnspan=2, pady=5)
+        Button(self.current_frame, text="Add Barcode", command=barcode_scan).grid(row=len(fields), column=2, columnspan=2, padx=10, pady=5, sticky= "w")
+        Button(self.current_frame, text="Bulk Scan", command=lambda: bulk_add(self)).grid(row=len(fields), column=3, columnspan=2, padx=10, pady=5, sticky= "w")
 
         self.root.bind("<Return>", lambda event: add_component())
         
@@ -532,7 +523,7 @@ class Frontend:
 
         edit_window = Toplevel(self.root)
         edit_window.title("Edit Component")
-        edit_window.geometry("500x600")
+        edit_window.geometry("800x600")  # Adjust width to accommodate extra panel
 
         highlight_state = {"on": False}  # Track whether the LED is currently highlighted.
         def on_close():
@@ -541,92 +532,84 @@ class Frontend:
             edit_window.destroy()
         edit_window.protocol("WM_DELETE_WINDOW", on_close)
 
-        #Part Info Section
+        # Left side: Part Info & Metadata fields
         fields = {}
-
         Label(edit_window, text="Part Information", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=5)
 
         for i, key in enumerate(["part_number", "manufacturer_number", "location", "count", "type"]):
-            Label(edit_window, text=key.replace("_", " ").title() + ":").grid(row=i+1, column=0, padx=10, pady=5)
+            Label(edit_window, text=key.replace("_", " ").title() + ":").grid(row=i+1, column=0, padx=10, pady=5, sticky="w")
             entry = Entry(edit_window, width=30)
             entry.insert(0, str(component["part_info"][key]))
             entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="ew")
             fields[key] = entry
 
-        # Metadata Section
-        Label(edit_window, text="Metadata", font=("Arial", 12, "bold")).grid(row=8, column=0, columnspan=2, pady=5)
+        Label(edit_window, text="Metadata", font=("Arial", 12, "bold")).grid(row=7, column=0, columnspan=2, pady=5)
 
         metadata_fields = {}
-
         for i, key in enumerate(["price", "low_stock", "description", "photo_url", "datasheet_url", "product_url"]):
-            Label(edit_window, text=key.replace("_", " ").title() + ":").grid(row=i+9, column=0, padx=10, pady=5)
+            Label(edit_window, text=key.replace("_", " ").title() + ":").grid(row=i+8, column=0, padx=10, pady=5, sticky="w")
             entry = Entry(edit_window, width=40)
             entry.insert(0, str(component["metadata"].get(key, "N/A")))
-            entry.grid(row=i+9, column=1, padx=10, pady=5, sticky="ew")
+            entry.grid(row=i+8, column=1, padx=10, pady=5, sticky="ew")
             metadata_fields[key] = entry
 
+        # Right side panel: Display part image and link buttons
+        right_frame = Frame(edit_window, bd=2, relief="groove")
+        right_frame.grid(row=7, column=2, columnspan=2, rowspan=4, padx=10, pady=10, sticky="n")
+
+        # Datasheet and Product Page buttons
+        datasheet_url = component["metadata"].get("datasheet_url", "")
+        product_url = component["metadata"].get("product_url", "")
+
+        if datasheet_url and datasheet_url != "N/A":
+            Button(right_frame, text="Datasheet", command=lambda: webbrowser.open(datasheet_url)).pack(pady=5, fill="x")
+        if product_url and product_url != "N/A":
+            Button(right_frame, text="Product Page", command=lambda: webbrowser.open(product_url)).pack(pady=5, fill="x")
+
+        # Existing Highlight button and Save Changes functionality
         highlight_color = (0, 255, 0)
         def toggle_highlight():
             if not highlight_state["on"]:
-                # Turn on the LED at the component's location.
                 self.ledControl.set_led_on(component["part_info"]["location"], *highlight_color)
                 highlight_button.config(text="Unhighlight")
                 highlight_state["on"] = True
             else:
-                # Turn off the LED.
                 self.ledControl.turn_off_led(component["part_info"]["location"])
                 highlight_button.config(text="Highlight")
                 highlight_state["on"] = False
 
         highlight_button = Button(edit_window, text="Highlight", command=toggle_highlight)
-        # Place the highlight button where it fits best (here we put it after metadata fields).
-        highlight_button.grid(row=15, column=0, columnspan=2, pady=10)
+        highlight_button.grid(row=6, column=0, columnspan=2, pady=10)
 
         def save_changes():
-            updated_data = {
-                "part_info": {},
-                "metadata": {}
-            }
-            # Save part_info fields
+            updated_data = {"part_info": {}, "metadata": {}}
             for key, entry in fields.items():
                 updated_data["part_info"][key] = entry.get().strip()
-            if "count" in updated_data["part_info"]:
-                try:
-                    updated_data["part_info"]["count"] = int(updated_data["part_info"]["count"])
-                except ValueError:
-                    messagebox.showerror("Error", "Count must be an integer!")
-                    return
-            else:
-                updated_data["part_info"]["count"] = 0  # Default if missing
+            try:
+                updated_data["part_info"]["count"] = int(updated_data["part_info"]["count"])
+            except ValueError:
+                messagebox.showerror("Error", "Count must be an integer!")
+                return
 
-            # Collect new metadata from the entry widgets
             new_metadata = {}
             metadata_changed = False
             for key, entry in metadata_fields.items():
                 new_val = entry.get().strip()
                 new_metadata[key] = new_val
-                # Get the original value (convert to string in case it's not)
                 original_val = str(component["metadata"].get(key, "N/A"))
                 if new_val != original_val:
                     metadata_changed = True
-
-            # If any metadata field was changed, ask the user to confirm
             if metadata_changed:
                 if not askyesno("Confirm Metadata Change", "Metadata fields have been modified. Are you sure you want to save these changes?"):
                     return
 
             updated_data["metadata"] = new_metadata
 
-            # Save the changes via the backend
             self.backend.edit_component(index, updated_data)
             messagebox.showinfo("Success", "Component updated successfully!")
-            
             if highlight_state["on"]:
                 self.ledControl.turn_off_led(component["part_info"]["location"])
-
             edit_window.destroy()
-
-            # Refresh only the selected row in the TreeView
             tree.item(selected_item, values=(
                 updated_data["part_info"]["part_number"],
                 updated_data["part_info"]["manufacturer_number"],
@@ -635,7 +618,7 @@ class Frontend:
                 updated_data["part_info"]["type"]
             ))
 
-        Button(edit_window, text="Save Changes", command=save_changes).grid(row=7, column=0, columnspan=2, pady=10)
+        Button(edit_window, text="Save Changes", command=save_changes).grid(row=6, column=2, columnspan=2, pady=10)
         edit_window.bind("<Return>", lambda event: save_changes())
 
     def delete_component(self, tree):
@@ -643,7 +626,10 @@ class Frontend:
         if not selected_item:
             messagebox.showerror("Error", "No component selected!")
             return
-
+        
+        if not askyesno("Confirm Component Deletion", "Are you sure you want to delete component?"):
+            return
+        
         index = int(tree.index(selected_item))
         self.backend.delete_component(index)
         messagebox.showinfo("Success", "Component deleted successfully!")
@@ -686,18 +672,7 @@ class Frontend:
         except Exception as e:
             messagebox.showerror("Export Error", f"Failed to export file:\n{e}")
 
-    def show_bom_file_window(self):
-        bom_win = Toplevel(self.root)
-        bom_win.title("BOM File Input")
-        bom_win.geometry("400x200")
-        bom_win.resizable(False, False)
-        
-        Label(bom_win, text="Select a BOM file to process:", font=("Arial", 12)).pack(pady=20)
-        Button(bom_win, text="Select File", command=lambda: self.process_bom_file(bom_win)).pack(pady=10)
-
-        bom_win.protocol("WM_DELETE_WINDOW", lambda: (self.ledControl.turn_off_recent(), bom_win.destroy()))
-
-    def process_bom_file(self, parent_win):
+    def process_bom_file(self):
         file_path = askopenfilename(
             title="Select BOM File",
             filetypes=[("CSV Files", "*.csv"), ("Text Files", "*.txt"), ("All Files", "*.*")]
@@ -747,8 +722,6 @@ class Frontend:
                     break
             row["found"] = found
 
-        parent_win.destroy()  # Close the BOM file input window.
-
         for row in bom_list:
             if row.get("found") and row.get("location"):
                 # Light that LED with, say, green color (0,255,0)
@@ -760,8 +733,9 @@ class Frontend:
         preview_win = Toplevel(self.root)
         preview_win.title("BOM Preview")
         preview_win.geometry("600x400")
+        preview_win.grab_set()
 
-        preview_win.protocol("WM_DELETE_WINDOW", lambda: (self.ledControl.turn_off_recent(), preview_win.destroy()))
+        preview_win.protocol("WM_DELETE_WINDOW", lambda: (self.ledControl.turn_off_bom_leds(bom_list, self.ledControl), preview_win.destroy()))
         
         # Create a BooleanVar for the Checkbutton.
         highlight_all = BooleanVar()
@@ -790,28 +764,42 @@ class Frontend:
                 row.get("current_count", "N/A")
             ))
 
+        self.last_selected_item = None
+        self.last_highlighted_location = None
+
         def update_highlighting():
+            self.ledControl.turn_off_bom_leds(bom_list, self.ledControl)
             """Update LED highlighting based on the checkbox and current selection."""
             # First, turn off any previously highlighted LEDs.
-            self.ledControl.turn_off_recent()
-            
+              
             if highlight_all.get():
+                self.ledControl.turn_off_bom_leds(bom_list, self.ledControl)
                 # Highlight every BOM row that is found and has a valid location.
                 for row in bom_list:
                     if row.get("found") and row.get("location"):
+                        time.sleep(0.1)
                         self.ledControl.set_led_on(row["location"], 0, 255, 0)
+                self.last_selected_item = None
+                self.last_highlighted_location = None
             else:
-                # Highlight only the currently selected row.
+                 # In single-select mode, always clear current highlights...
+                self.ledControl.turn_off_bom_leds(bom_list, self.ledControl)
+                # ...then light the LED for the currently selected row, if any.
+
+                time.sleep(0.1)
+                
                 selected = tree.selection()
                 if selected:
-                    # Get the Digikey part number from the selected row.
+                    self.last_selected_item = selected[0]
                     item = tree.item(selected[0], "values")
                     selected_digikey = item[0]
-                    # Find the corresponding row in bom_list.
+                    # Find the matching BOM row by Digikey part number.
                     for row in bom_list:
                         if row["digikey"].lower() == selected_digikey.lower():
-                            if row.get("found") and row.get("location"):
-                                self.ledControl.set_led_on(row["location"], 0, 255, 0)
+                            location = row.get("location")
+                            if row.get("found") and location:
+                                self.ledControl.set_led_on(location, 0, 255, 0)
+                                self.last_highlighted_location = location
                             break
         
         def on_tree_select(event):
@@ -820,7 +808,7 @@ class Frontend:
                 update_highlighting()
         
         # Bind the selection event to update highlighting.
-        tree.bind("<<TreeviewSelect>>", on_tree_select)
+        tree.bind("<<TreeviewSelect>>", lambda event: update_highlighting() if not highlight_all.get() else None)
         
         def process_bom_callback():
             # Call backend.process_bom to subtract quantities from found items.
@@ -947,3 +935,29 @@ class Frontend:
             lit_win.protocol("WM_DELETE_WINDOW", lambda: (self.ledControl.turn_off_recent(), lit_win.destroy()))
             
         Button(checkout_win, text="Submit", command=submit_qty).pack(pady=10)
+
+    def undo_last_deletion(self):
+        if self.backend.undo_delete():
+            messagebox.showinfo("Undo", "Last deletion undone!")
+        else:
+            messagebox.showinfo("Undo", "No deletion to undo.")
+
+    def refresh_treeview(self, tree):
+        """
+        Clears and repopulates the given Treeview widget with the latest components.
+        Expects the Treeview to have columns in the following order:
+        Part Number, Manufacturer Number, Location, Count, Type.
+        """
+        # Clear all existing items.
+        for item in tree.get_children():
+            tree.delete(item)
+            
+        # Repopulate the tree with the current components.
+        for comp in self.backend.get_all_components():
+            tree.insert("", "end", values=(
+                comp["part_info"].get("part_number", "N/A"),
+                comp["part_info"].get("manufacturer_number", "N/A"),
+                comp["part_info"].get("location", "N/A"),
+                comp["part_info"].get("count", "N/A"),
+                comp["part_info"].get("type", "N/A")
+            ))
