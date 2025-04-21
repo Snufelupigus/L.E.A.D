@@ -9,8 +9,6 @@ import threading
 from collections import OrderedDict
 import datetime
 
-#Test
-
 class Backend:
     def __init__(self, data_file=None, changelog_file=None):
         script_dir = os.path.dirname(os.path.abspath(__file__))  # Get directory of backend.py
@@ -295,12 +293,9 @@ class Backend:
     
     def process_bom_out(self, bom_list, board_name):
         """
-        For each BOM row (a dictionary with at least:
-            "digikey": Digi-Key part number,
-            "quantity": quantity used as string,
-            "found": True/False),
-        this method subtracts the used quantity from the count of found components.
-        Returns a list of result dictionaries with keys: "part", "remaining", "status".
+        For each BOM row (dict with "digikey", "quantity", "found"):
+        - If count < needed, skip subtraction and status "Out of Stock"
+        - Else subtract and status "Updated"
         """
         results = []
         for row in bom_list:
@@ -311,22 +306,29 @@ class Backend:
                 quantity_used = 0
 
             if row.get("found"):
-                # Find the component in the catalogue
                 for comp in self.components:
-                    comp_digikey = comp["part_info"].get("part_number", "").strip()
-                    if comp_digikey.lower() == digikey.lower():
+                    if comp["part_info"].get("part_number","").strip().lower() == digikey.lower():
                         try:
-                            current_count = int(comp["part_info"].get("count", 0))
+                            current = int(comp["part_info"].get("count",0))
                         except ValueError:
-                            current_count = 0
-                        new_count = current_count - quantity_used
-                        comp["part_info"]["count"] = new_count
-                        comp["metadata"]["in_use"] = f"Used for {board_name}"
-                        results.append({
-                            "part": digikey,
-                            "remaining": new_count,
-                            "status": "Updated"
-                        })
+                            current = 0
+
+                        if current < quantity_used:
+                            # OUT OF STOCK — no subtraction
+                            results.append({
+                                "part": digikey,
+                                "remaining": current,
+                                "status": "Out of Stock"
+                            })
+                        else:
+                            new_count = current - quantity_used
+                            comp["part_info"]["count"] = new_count
+                            comp["metadata"]["in_use"] = f"Used for {board_name}"
+                            results.append({
+                                "part": digikey,
+                                "remaining": new_count,
+                                "status": "Updated"
+                            })
                         break
             else:
                 results.append({
@@ -334,8 +336,10 @@ class Backend:
                     "remaining": "N/A",
                     "status": "Not found in catalogue"
                 })
-        self.save_components()  # Save updated inventory.
+
+        self.save_components()
         return results
+
     
     def process_returned_vials(self, bom_list, additional_usage):
         """

@@ -839,14 +839,17 @@ class Frontend:
             return
 
         bom_list = []
-        # Assuming each line is CSV with 5 columns:
-        # Part, Digikey #, Manufacturer #, Price, # of Parts
         for line in lines[1:]:
-            if not line[0].strip():
-                continue
             parts = [p.strip() for p in line.split(",")]
+
+            # — Skip any row where the Part column is empty —
+            if not parts or not parts[0]:
+                continue
+
+            # Now ensure you still have at least 5 columns
             if len(parts) < 5:
                 continue
+
             bom_list.append({
                 "part": parts[0],
                 "digikey": parts[1],
@@ -854,6 +857,7 @@ class Frontend:
                 "price": parts[3],
                 "quantity": parts[4]
             })
+
 
         if not bom_list:
             messagebox.showerror("Error", "No valid BOM rows found in the file!")
@@ -874,6 +878,14 @@ class Frontend:
                     break
             row["found"] = found
 
+        for row in bom_list:
+            try:
+                qty = int(row.get("quantity",0))
+                curr = int(row.get("current_count",0))
+            except ValueError:
+                qty = curr = 0
+            row["out_of_stock"] = row.get("found", False) and (curr < qty)
+
         if button =="out":
             self.bom_out_preview(bom_list, board_name)
         else:
@@ -882,90 +894,83 @@ class Frontend:
     def bom_out_preview(self, bom_list, board_name):
         preview_win = Toplevel(self.root)
         preview_win.title("BOM Preview")
-        preview_win.geometry("600x400")
+        preview_win.geometry("700x400")
         preview_win.grab_set()
-        
-        # Create a BooleanVar for the Checkbutton.
-        highlight_all = BooleanVar()
-        highlight_all.set(False)  # Default: highlight only the selected component.
 
-        # Create a Checkbutton to allow the user to toggle highlighting.
-        chk = Checkbutton(preview_win, text="Highlight All Components", variable=highlight_all, command=lambda: update_highlighting())
-        chk.pack(anchor="w", padx=10, pady=5)
-
-        tree = Treeview(preview_win, columns=("Digikey", "Quantity", "Found", "Current Count"), show="headings")
-        tree.heading("Digikey", text="Digikey Part #")
-        tree.heading("Quantity", text="# Used")
-        tree.heading("Found", text="Found")
-        tree.heading("Current Count", text="Current Count")
-        
+        # ——— Treeview with Location column ———
+        cols = ("Digikey", "Quantity", "Found", "Current Count", "Location")
+        tree = Treeview(preview_win, columns=cols, show="headings")
+        for col in cols:
+            tree.heading(col, text=col)
+            tree.column(col, width=100, anchor="center")
         tree.column("Digikey", width=150, anchor="w")
-        tree.column("Quantity", width=80, anchor="center")
-        tree.column("Found", width=80, anchor="center")
-        tree.column("Current Count", width=100, anchor="center")
-        tree.pack(fill="both", expand=True, padx=10, pady=10)
-        
+
+        tree.tag_configure('out_of_stock', background='tomato')
+
+        # insert rows, now including location
         for row in bom_list:
-            tree.insert("", "end", values=(
-                row["digikey"], row["quantity"], 
-                "Yes" if row.get("found") else "No", 
-                row.get("current_count", "N/A")
-            ))
+            tags = ('out_of_stock',) if row.get("out_of_stock") else ()
+            tree.insert("", "end",
+                        values=(
+                            row["digikey"],
+                            row["quantity"],
+                            "Yes" if row.get("found") else "No",
+                            row.get("current_count", "N/A"),
+                            row.get("location", "N/A")
+                        ),
+                        tags=tags)
+        tree.pack(fill="both", expand=True, padx=10, pady=10)
 
-        self.last_selected_item = None
-        self.last_highlighted_location = None
+        # helper to get location safely
+        def get_selected_location():
+            sel = tree.selection()
+            if not sel:
+                return None
+            vals = tree.item(sel[0], "values")
+            # now vals[4] always exists
+            return vals[4]
 
-        def update_highlighting():
-            """Update LED highlighting based on the checkbox and current selection."""
-              
-            if highlight_all.get():
-                self.ledControl.turn_off_bom_leds(bom_list, self.ledControl)
-                # Highlight every BOM row that is found and has a valid location.
-                tree.selection_set(())
-                for row in bom_list:
-                    if row.get("found") and row.get("location"):
-                        time.sleep(0.05)
-                        self.ledControl.set_led_on(row["location"], 0, 255, 0)
-                self.last_selected_item = None
-                self.last_highlighted_location = None
-            else:
-                 # In single-select mode, always clear current highlights...
-                self.ledControl.turn_off_bom_leds(bom_list, self.ledControl)
-                # ...then light the LED for the currently selected row, if any.
+        # highlight a single vial with odd/even color from LedController
+        def on_select(event=None):
+            loc = get_selected_location()
+            if loc:
+                self.ledControl.highlight_location(loc)
 
-                time.sleep(0.05)
-                
-                selected = tree.selection()
-                if selected:
-                    self.last_selected_item = selected[0]
-                    item = tree.item(selected[0], "values")
-                    selected_digikey = item[0]
-                    # Find the matching BOM row by Digikey part number.
-                    for row in bom_list:
-                        if row["digikey"].lower() == selected_digikey.lower():
-                            location = row.get("location")
-                            if row.get("found") and location:
-                                self.ledControl.set_led_on(location, 0, 255, 0)
-                                self.last_highlighted_location = location
-                            break
-        
-        def on_tree_select(event):
-            """When the selection changes in the Treeview, update highlighting (if not highlighting all)."""
-            if not highlight_all.get():
-                update_highlighting()
-        
-        # Bind the selection event to update highlighting.
-        tree.bind("<<TreeviewSelect>>", lambda event: update_highlighting() if not highlight_all.get() else None)
-        
+        # bind both mouse and keyboard navigation
+        tree.bind("<<TreeviewSelect>>", on_select)
+        tree.bind("<ButtonRelease-1>", on_select)
+        tree.bind("<Up>", on_select)
+        tree.bind("<Down>", on_select)
+
+        # ——— Consume button ———
         def process_bom_callback():
-            # Call backend.process_bom to subtract quantities from found items.
             results = self.backend.process_bom_out(bom_list, board_name)
             preview_win.destroy()
-            self.ledControl.turn_off_recent()
-            self.show_bom_results(results)
+
+            # light all remaining locations
+            locs = [row["location"] for row in bom_list
+                    if row.get("found") and row.get("location")]
+            self.ledControl.highlight_all(locs)
+
+            grab_win = Toplevel(self.root)
+            grab_win.title("Grab Components")
+            grab_win.geometry("300x150")
+            Label(grab_win,
+                  text="Please grab all vials highlighted in color.\nPress Enter or click OK when done.",
+                  justify="center").pack(pady=20)
             
+            def finish():
+                # completely clear every LED
+                self.ledControl.turn_off_all()
+                grab_win.destroy()
+                self.show_bom_results(results)
+
+            Button(grab_win, text="OK", width=10, command=finish).pack(pady=10)
+            grab_win.bind("<Return>", lambda e: finish())
+            grab_win.protocol("WM_DELETE_WINDOW", finish)
+
         Button(preview_win, text="Consume Components?", command=process_bom_callback).pack(pady=10)
-        preview_win.protocol("WM_DELETE_WINDOW", lambda: (self.ledControl.turn_off_all_assigned_leds(self.backend), preview_win.destroy()))
+        preview_win.protocol("WM_DELETE_WINDOW", lambda: (self.ledControl.turn_off_all(), preview_win.destroy()))
 
     def bom_in_preview(self, bom_list):
             preview_win = Toplevel(self.root)
@@ -1087,6 +1092,18 @@ class Frontend:
         qty_entry.focus_set()
 
         def submit_qty():
+            if current_count == 0:
+                messagebox.showinfo(
+                  "Out of Stock",
+                  f"Component {part_number} is currently out of stock and cannot be removed."
+                )
+                checkout_win.destroy()
+                return
+
+            if qty > current_count:
+                messagebox.showerror("Error", "Not enough components in stock")
+                return
+            
             qty_str = qty_entry.get().strip()
             try:
                 qty = int(qty_str)
