@@ -38,6 +38,13 @@ class Digikey_API_Call:
             if "error" in result:
                 messagebox.showerror("API Error", f"Error: {result['error']}")
                 return None
+            
+            price_val = result.get('price', 0.0)
+            try:
+                price = float(price_val)
+            except ValueError:
+                price = 0.0  # or you could use None if that fits your logic
+
 
             return {
                 "part_info": {
@@ -48,12 +55,13 @@ class Digikey_API_Call:
                     "type": result.get('type', "N/A")
                 },
                 "metadata": {
-                    "price": float(result.get('price', 0.0)),
+                    "price": price,
                     "low_stock": "N/A",
                     "description": result.get('description', "N/A"),
                     "photo_url": result.get('photoUrl', "N/A"),
                     "datasheet_url": result.get('datasheetUrl', "N/A"),
-                    "product_url": result.get('productUrl', "N/A")
+                    "product_url": result.get('productUrl', "N/A"),
+                    "in_use": "Available"
                 }
             }
         except requests.exceptions.RequestException as e:

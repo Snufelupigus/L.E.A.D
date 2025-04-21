@@ -1,10 +1,11 @@
-from tkinter import Tk, Label, Entry, Button, Canvas, StringVar, OptionMenu,  Menu, Frame, Toplevel, messagebox, Scrollbar, LEFT, BOTH, RIGHT, Y,  END, Checkbutton, BooleanVar
+from tkinter import Tk, Label, Entry, Button, Canvas, StringVar, simpledialog, OptionMenu,  Menu, Frame, Toplevel, messagebox, Scrollbar, LEFT, BOTH, RIGHT, Y,  END, Checkbutton, BooleanVar, TOP, X
 from tkinter.ttk import Treeview, Combobox
 from tkinter.messagebox import askyesno
 from tkinter.filedialog import asksaveasfilename, askopenfilename
 
+import os
+
 import time
-from PIL import Image, ImageTk
 from io import BytesIO
 import webbrowser
 
@@ -14,26 +15,37 @@ class Frontend:
         self.digikeyAPI = digikeyAPI
         self.ledControl = ledControl
         self.current_frame = None
+        self.current_menu = None
+        self.test_mode = False
 
         # Initialize Tkinter window
         self.root = Tk()
         self.root.title("Component Catalogue")
         self.root.geometry("1250x750")
+
         self.create_menu()
         self.root.focus_force()
+
+        self.root.bind("<Control-Alt-t>", self.toggle_test_mode)
+        self.default_bg = self.root.cget("bg")
 
         # Start with the home page
         self.show_home()
 
         self.root.mainloop()
 
+    def switch_menu(self, menu_func):
+        """Helper to switch menus and record the current menu"""
+        self.currrent_menu = menu_func
+        menu_func()
+
     def create_menu(self):
         menu_bar = Menu(self.root)
 
         nav_menu = Menu(menu_bar, tearoff=0)
-        nav_menu.add_command(label="Home", command=self.show_home)
-        nav_menu.add_command(label="Search", command=self.show_search)
-        nav_menu.add_command(label="Add", command=self.show_add)
+        nav_menu.add_command(label="Home", command=lambda: self.switch_menu(self.show_home))
+        nav_menu.add_command(label="Search", command=lambda: self.switch_menu(self.show_search))
+        nav_menu.add_command(label="Add", command=lambda: self.switch_menu(self.show_add))
         menu_bar.add_cascade(label="Navigation", menu=nav_menu)
 
         self.root.config(menu=menu_bar)
@@ -46,7 +58,31 @@ class Frontend:
 
         self.root.config(menu=menu_bar)
 
+    def toggle_test_mode(self, event=None):
+        self.test_mode = not self.test_mode
+        
+        current_dir = os.path.dirname(self.backend.data_file)
+
+        if self.test_mode:
+            self.backend.data_file = os.path.join(current_dir, "test_catalogue.json")
+            messagebox.showinfo("Test Mode", "Test Mode ENABLED")
+            self.root.config(bg="red")
+        else:
+            self.backend.data_file = os.path.join(current_dir, "component_catalogue.json")
+            messagebox.showinfo("Test Mode", "Test Mode DISABLED")
+            self.root.config(bg=self.default_bg)
+
+        self.backend.load_components()
+    
+        # Refresh the current menu. If current_menu is not set, default to home.
+        if hasattr(self, 'current_menu') and self.current_menu:
+            self.current_menu()
+        else:
+            self.show_home()
+
     def clear_frame(self):
+
+        self.ledControl.turn_off_recent()
         if self.current_frame is not None:
             self.current_frame.destroy()
 
@@ -62,12 +98,20 @@ class Frontend:
         Label(self.current_frame, text=f"Total Parts: {stats['total_parts']}").pack(pady=10)
         Label(self.current_frame, text=f"Types of Parts: {', '.join(stats['types'])}").pack(pady=10)
 
-            # Add a separator label before the low-stock table.
+        Label(self.current_frame, text="Build A Board", font=("Arial", 16)).pack(pady=20)
+
+        buttons_frame = Frame(self.current_frame)
+        buttons_frame.pack(side=TOP, fill=X, padx=10, pady=5)
+
+        center_frame = Frame(buttons_frame)
+        center_frame.pack(expand=True)
+
+        Button(center_frame, text="Checkout From BOM", command=lambda: self.process_bom_file("out")).pack(side=LEFT, padx=10)
+        Button(center_frame, text="Check In From BOM", command=lambda: self.process_bom_file("in")).pack(side=LEFT, padx=10)
+
         Label(self.current_frame, text="Low Stock Items", font=("Arial", 16)).pack(pady=20)
 
         Button(self.current_frame, text="Export Low Stock Data", command=self.export_low_stock_data).pack(pady=10)
-
-        Button(self.current_frame, text="Process BOM File", command=self.process_bom_file).pack(padx=10)
 
         # Create a Treeview to show low-stock items.
         low_stock_tree = Treeview(self.current_frame, columns=("Digikey", "Count", "LowStock", "ProductURL"), show="headings")
@@ -116,24 +160,27 @@ class Frontend:
         self.current_frame.columnconfigure(0, weight=0)
         self.current_frame.columnconfigure(1, weight=0)
         self.current_frame.columnconfigure(2, weight=0)
+        self.current_frame.columnconfigure(3, weight=1)
+        self.current_frame.columnconfigure(4, weight=1)
 
         Label(self.current_frame, text="Search Components", font=("Arial", 16)).grid(row=0, column=0, columnspan=2, pady=20, sticky="w")
 
-        # Bind delete key, etc.
-        Button(self.current_frame, text="Checkout", command=lambda: self.checkout_component(search_tree)).grid(row=3, column=1, pady=10)
-
-
         # Search bar
         Label(self.current_frame, text="Search:").grid(row=1, column=0, padx=10, pady=5, sticky= "w")
-        search_entry = Entry(self.current_frame, width=40)
-        search_entry.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
+        search_entry = Entry(self.current_frame, width=80)
+        search_entry.grid(row=2, column=0, padx=10, pady=5, sticky="ew", columnspan=3)
+
+        self.details_frame = Frame(self.current_frame, bd=2, relief="groove", padx=10, pady=20)
+        self.details_frame.grid(row=0, column=3, columnspan=2, rowspan=5, sticky="nsew", padx=10)
+        self.details_label = Label(self.details_frame, text="Component Details will appear here", justify="left")
+        self.details_label.pack(fill="both", expand=True)
 
         # Table of components
         search_tree = Treeview(self.current_frame, columns=("Part Number", "Manufacturer Number", "Location", "Count", "Type"), show="headings")
         for col in search_tree["columns"]:
             search_tree.heading(col, text=col)
             search_tree.column(col, anchor="w")
-        search_tree.grid(row=2, column=0, columnspan=3, sticky="nsew", padx=10, pady=10)
+        search_tree.grid(row=6, column=0, columnspan=5, sticky="nsew", padx=10, pady=10)
 
         def update_search_results(event):
             query = search_entry.get().strip()
@@ -146,12 +193,10 @@ class Frontend:
         search_entry.bind("<KeyRelease>", update_search_results)
 
         search_tree.bind("<Double-Button-1>", lambda event: self.edit_component(search_tree))
+        search_tree.bind("<<TreeviewSelect>>", lambda event: self.show_component_details(event))
 
         # Populate table initially with all components
         update_search_results(None)
-
-        # Edit button
-        Button(self.current_frame, text="Edit Component", command=lambda: self.edit_component(search_tree)).grid(row=3, column=0, columnspan=2, pady=10)
 
         # Bind delete key
         search_tree.bind("<Delete>", lambda event: self.delete_component(search_tree))
@@ -216,10 +261,13 @@ class Frontend:
 
         Label(self.current_frame, text="Type of Component:").grid(row=4, column=0, padx=5, pady=5, sticky="w")
         Combobox(self.current_frame, textvariable=component_type_var, values=component_types, width=12).grid(row=4, column=1, padx=5, pady=5, sticky="w")
-        #component_type_combobox.bind("<KeyRelease>", lambda event: update_autocomplete(event, component_type_combobox, component_types))
+
+        self.details_frame = Frame(self.current_frame, bd=2, relief="groove", padx=10, pady=20)
+        self.details_frame.grid(row=0, column=4, columnspan=2, rowspan=6, sticky="nsew", padx=10)
+        self.details_label = Label(self.details_frame, text="Component Details will appear here", justify="left")
+        self.details_label.pack(fill="both", expand=True)
 
         def add_component():
-            #component_data = {key: widget.get().strip() if isinstance(widget, Entry) else component_type_var.get() for key, (_, widget) in fields.items()}
             component_data = {key: entry_widget.get().strip() for key, (_, entry_widget) in fields.items()}
 
             if not component_data["part_number"]:
@@ -237,7 +285,7 @@ class Frontend:
                 return
             
             if self.backend.check_duplicate(component_data)== False: 
-                messagebox.showinfo("Found Duplicate:", component_data['part_number'])
+                messagebox.showinfo("Found Duplicate", f"Component {component_data['part_number']} already exists. Added {component_data['count']} units.")
                 update_add_tree()
                 
                 for key, (_, widget) in fields.items():
@@ -249,11 +297,11 @@ class Frontend:
             
             fetch_digikey_data(self)
         
-        def fetch_digikey_data(self, part_number=None):
-            if part_number:
-                response = self.digikeyAPI.fetch_part_details(part_number["part_number"])
-                response["part_info"]["count"] = part_number["count"]
-                response["metadata"]["low_stock"] = part_number["low_stock"]
+        def fetch_digikey_data(self, part=None):
+            if part:
+                response = self.digikeyAPI.fetch_part_details(part["part_number"])
+                response["part_info"]["count"] = part["count"]
+                response["metadata"]["low_stock"] = part["low_stock"]
                 print(response)
                 self.backend.add_component(response)
                 messagebox.showinfo("Success", "Component added successfully!")
@@ -268,17 +316,6 @@ class Frontend:
                     component_data["count"] = int(component_data["count"])
                 except ValueError:
                     messagebox.showerror("Error", "Count must be an integer!")
-                    return
-                
-                if self.backend.check_duplicate(component_data)== False: 
-                    messagebox.showinfo("Found Duplicate:", component_data['part_number'])
-                    update_add_tree()
-
-                    for key, (_, widget) in fields.items():
-                        if isinstance(widget, Entry):
-                            widget.delete(0, END)
-                        else:
-                            component_type_var.set("Other")
                     return
                 
                 response = self.digikeyAPI.fetch_part_details(component_data['part_number'])
@@ -298,7 +335,8 @@ class Frontend:
                                 "description": "N/A",
                                 "photo_url": "N/A",
                                 "datasheet_url": "N/A",
-                                "product_url": "N/A"
+                                "product_url": "N/A",
+                                "in_use": "Available"
                             }
                         }
 
@@ -315,11 +353,25 @@ class Frontend:
                 else:
                     #found digikey component
                     if response:
-                        if part_number is None:
+                        if part is None:
                             response["part_info"]["count"] = component_data["count"]
                             response["metadata"]["low_stock"] = component_data["low_stock"]
                             response['part_info']['location'] = component_data['location']
 
+                        #Create dic for duplicate checking
+                        component = {"part_number":response["part_info"]["part_number"], "count":response["part_info"]["count"]}
+
+                        if self.backend.check_duplicate(component) == False: 
+                            messagebox.showinfo("Found Duplicate", f"Component {component['part_number']} already exists. Added {component['count']} units.")
+                            update_add_tree()
+
+                            for key, (_, widget) in fields.items():
+                                if isinstance(widget, Entry):
+                                    widget.delete(0, END)
+                                else:
+                                    component_type_var.set("Other")
+                            return
+                
                         self.backend.add_component(response)
                         messagebox.showinfo("Success", "Component added successfully!")
 
@@ -348,6 +400,16 @@ class Frontend:
             def process_barcode(event):
                 """Detects barcode input and sends it to DigiKey API."""
                 barcode = barcode_var.get().strip()
+
+                barcode_data=self.backend.barcode_decoder(barcode)
+
+                print(barcode_data)
+                if self.backend.check_duplicate(barcode_data)== False: 
+                            print("found duplicate")
+                            messagebox.showinfo("Found Duplicate:", barcode_data['part_number']) 
+                            update_add_tree()
+                            return
+                print("didnt")
                 barcode_window.destroy()  # Close the window
 
                 extraInfo = Toplevel(self.root)
@@ -365,13 +427,7 @@ class Frontend:
                     low_stock = int(low_stock_var.get())
                     extraInfo.destroy()  # Close the window
                     if barcode:
-                        barcode_data=self.backend.barcode_decoder(barcode)
                         barcode_data['low_stock'] = low_stock
-
-                        if self.backend.check_duplicate(barcode_data)== False: 
-                            messagebox.showinfo("Found Duplicate:", barcode_data['part_number']) 
-                            update_add_tree()
-                            return
 
                         fetch_digikey_data(self, barcode_data)
                 
@@ -490,7 +546,7 @@ class Frontend:
         
         # Table of components
         add_tree = Treeview(self.current_frame, columns=("Part Number", "Manufacturer Number", "Location", "Count", "Type"), show="headings")
-        
+
         for col in add_tree["columns"]:
             add_tree.heading(col, text=col)
             add_tree.column(col, anchor="w")
@@ -503,6 +559,7 @@ class Frontend:
                 add_tree.insert("", "end", values=(comp["part_info"]["part_number"], comp["part_info"]["manufacturer_number"], comp["part_info"]["location"], comp["part_info"]["count"], comp["part_info"]["type"]))
 
         add_tree.bind("<Double-Button-1>", lambda event: self.edit_component(add_tree))
+        add_tree.bind("<<TreeviewSelect>>", lambda event: self.show_component_details(event))
 
         update_add_tree()
 
@@ -511,6 +568,85 @@ class Frontend:
 
         # Bind delete key
         add_tree.bind("<Delete>", lambda event: self.delete_component(add_tree))
+    
+    def show_component_details(self, event):
+        tree = event.widget
+        selected = tree.selection()
+
+        if not selected:
+            for widget in self.details_frame.winfo_children():
+                widget.destroy()
+            Label(self.details_frame, text="No component selected", justify="left").pack(fill="both", expand=True)
+            return
+
+        # Get the part number from the selected row (assumed to be the first column)
+        item = tree.item(selected[0], "values")
+        part_number = item[0]
+
+        # Look up the component from the backend using part_number
+        component = None
+        for comp in self.backend.get_all_components():
+            if comp["part_info"]["part_number"].strip().lower() == part_number.strip().lower():
+                component = comp
+                break
+        if not component:
+            return
+
+        # Clear any previous details
+        for widget in self.details_frame.winfo_children():
+            widget.destroy()
+
+        # Create two subframes: one for Part Info and one for Meta Data
+        part_info_frame = Frame(self.details_frame, bd=1, relief="solid", padx=5, pady=5, width=250)
+        part_info_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        meta_frame = Frame(self.details_frame, bd=1, relief="solid", padx=5, width=250, pady=5)
+        meta_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        self.details_frame.columnconfigure(0, weight=1, minsize=250)
+        self.details_frame.columnconfigure(1, weight=1, minsize=250)
+        #meta_frame.grid_propagate(False)
+        #part_info_frame.grid_propagate(False)
+
+        # Headers
+        Label(part_info_frame, text="Part Info", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=0)
+        Label(meta_frame, text="Meta Data", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=0)
+
+        # Populate Part Info (each key-value pair on its own row)
+        row_idx = 1
+        for key, value in component["part_info"].items():
+            Label(part_info_frame, text=f"{key}:", anchor="w").grid(row=row_idx, column=0, sticky="w", padx=2, pady=2)
+            Label(part_info_frame, text=f"{value}", anchor="w").grid(row=row_idx, column=0, sticky="w", padx=(100,2), pady=2)
+            row_idx += 1
+
+        # Populate Meta Data similarly
+        Label(meta_frame, text=f"Price:", anchor="w").grid(row=1, column=1, sticky="w", padx=2, pady=2)
+        Label(meta_frame, text=component["metadata"]["price"], anchor="w").grid(row=1, column=1, sticky="w", padx=(100,2), pady=2)
+        Label(meta_frame, text=f"Low Stock:", anchor="w").grid(row=2, column=1, sticky="w", padx=2, pady=2)
+        Label(meta_frame, text=component["metadata"]["low_stock"], anchor="w").grid(row=2, column=1, sticky="w", padx=(100,2), pady=2)
+        Label(meta_frame, text=f"Description:", anchor="w").grid(row=3, column=1, sticky="w", padx=2, pady=2)
+        Label(meta_frame, text=component["metadata"]["description"], anchor="w").grid(row=3, column=1, sticky="w", padx=(100,2), pady=2)
+        Label(meta_frame, text=f"In Use?:", anchor="w").grid(row=4, column=1, sticky="w", padx=2, pady=2)
+        Label(meta_frame, text=component["metadata"]["in_use"], anchor="w").grid(row=4, column=1, sticky="w", padx=(100,2), pady=2)
+
+        highlight_state = {"on": False}  # Track whether the LED is currently highlighted.
+
+        highlight_color = (0, 255, 0)
+
+        highlight_button = Button(self.details_frame, text="Highlight")
+        highlight_button.grid(row=6, column=0, columnspan=2, pady=10, sticky="e")
+
+        def toggle_highlight():
+            if not highlight_state["on"]:
+                self.ledControl.set_led_on(component["part_info"]["location"], *highlight_color)
+                highlight_button.config(text="Unhighlight")
+                highlight_state["on"] = True
+            else:
+                self.ledControl.turn_off_led(component["part_info"]["location"])
+                highlight_button.config(text="Highlight")
+                highlight_state["on"] = False
+
+        highlight_button.config(command=toggle_highlight)
+        Button(self.details_frame, text="Checkout", command=lambda: self.checkout_component(tree)).grid(row=6, column=0, columnspan=2, pady=10)
+        Button(self.details_frame, text="Edit Component", command=lambda: self.edit_component(tree)).grid(row=6, column=0, columnspan=2, pady=10, sticky="w")
 
     def edit_component(self, tree):
         selected_item = tree.selection()
@@ -519,7 +655,13 @@ class Frontend:
             return
 
         index = int(tree.index(selected_item))
-        component = self.backend.get_all_components()[index]
+
+        item = tree.item(selected_item[0], "values")
+        part_number = item[0]  # Assuming the first column is the part_number
+
+        # Search for the component in the backend using part_number
+        component = next((comp for comp in self.backend.get_all_components() 
+                        if comp["part_info"]["part_number"].strip().lower() == part_number.strip().lower()), None)
 
         edit_window = Toplevel(self.root)
         edit_window.title("Edit Component")
@@ -546,7 +688,7 @@ class Frontend:
         Label(edit_window, text="Metadata", font=("Arial", 12, "bold")).grid(row=7, column=0, columnspan=2, pady=5)
 
         metadata_fields = {}
-        for i, key in enumerate(["price", "low_stock", "description", "photo_url", "datasheet_url", "product_url"]):
+        for i, key in enumerate(["price", "low_stock", "description", "photo_url", "datasheet_url", "product_url", "in_use"]):
             Label(edit_window, text=key.replace("_", " ").title() + ":").grid(row=i+8, column=0, padx=10, pady=5, sticky="w")
             entry = Entry(edit_window, width=40)
             entry.insert(0, str(component["metadata"].get(key, "N/A")))
@@ -672,7 +814,7 @@ class Frontend:
         except Exception as e:
             messagebox.showerror("Export Error", f"Failed to export file:\n{e}")
 
-    def process_bom_file(self):
+    def process_bom_file(self, button):
         file_path = askopenfilename(
             title="Select BOM File",
             filetypes=[("CSV Files", "*.csv"), ("Text Files", "*.txt"), ("All Files", "*.*")]
@@ -680,6 +822,14 @@ class Frontend:
         if not file_path:
             messagebox.showerror("Error", "No file selected!")
             return
+
+        file_name = os.path.basename(file_path)
+        index = file_name.find(" BOM")
+        
+        if index != -1:
+            board_name = file_name[:index]
+        else:
+            board_name = file_name
 
         try:
             with open(file_path, "r") as f:
@@ -691,7 +841,9 @@ class Frontend:
         bom_list = []
         # Assuming each line is CSV with 5 columns:
         # Part, Digikey #, Manufacturer #, Price, # of Parts
-        for line in lines:
+        for line in lines[1:]:
+            if not line[0].strip():
+                continue
             parts = [p.strip() for p in line.split(",")]
             if len(parts) < 5:
                 continue
@@ -722,20 +874,16 @@ class Frontend:
                     break
             row["found"] = found
 
-        for row in bom_list:
-            if row.get("found") and row.get("location"):
-                # Light that LED with, say, green color (0,255,0)
-                self.ledControl.set_led_on(row["location"], 0, 255, 0)
+        if button =="out":
+            self.bom_out_preview(bom_list, board_name)
+        else:
+            self.bom_in_preview(bom_list)
 
-        self.show_bom_preview(bom_list)
-
-    def show_bom_preview(self, bom_list):
+    def bom_out_preview(self, bom_list, board_name):
         preview_win = Toplevel(self.root)
         preview_win.title("BOM Preview")
         preview_win.geometry("600x400")
         preview_win.grab_set()
-
-        preview_win.protocol("WM_DELETE_WINDOW", lambda: (self.ledControl.turn_off_bom_leds(bom_list, self.ledControl), preview_win.destroy()))
         
         # Create a BooleanVar for the Checkbutton.
         highlight_all = BooleanVar()
@@ -768,16 +916,15 @@ class Frontend:
         self.last_highlighted_location = None
 
         def update_highlighting():
-            self.ledControl.turn_off_bom_leds(bom_list, self.ledControl)
             """Update LED highlighting based on the checkbox and current selection."""
-            # First, turn off any previously highlighted LEDs.
               
             if highlight_all.get():
                 self.ledControl.turn_off_bom_leds(bom_list, self.ledControl)
                 # Highlight every BOM row that is found and has a valid location.
+                tree.selection_set(())
                 for row in bom_list:
                     if row.get("found") and row.get("location"):
-                        time.sleep(0.1)
+                        time.sleep(0.05)
                         self.ledControl.set_led_on(row["location"], 0, 255, 0)
                 self.last_selected_item = None
                 self.last_highlighted_location = None
@@ -786,7 +933,7 @@ class Frontend:
                 self.ledControl.turn_off_bom_leds(bom_list, self.ledControl)
                 # ...then light the LED for the currently selected row, if any.
 
-                time.sleep(0.1)
+                time.sleep(0.05)
                 
                 selected = tree.selection()
                 if selected:
@@ -812,17 +959,92 @@ class Frontend:
         
         def process_bom_callback():
             # Call backend.process_bom to subtract quantities from found items.
-            results = self.backend.process_bom(bom_list)
+            results = self.backend.process_bom_out(bom_list, board_name)
             preview_win.destroy()
             self.ledControl.turn_off_recent()
             self.show_bom_results(results)
             
         Button(preview_win, text="Consume Components?", command=process_bom_callback).pack(pady=10)
+        preview_win.protocol("WM_DELETE_WINDOW", lambda: (self.ledControl.turn_off_all_assigned_leds(self.backend), preview_win.destroy()))
 
+    def bom_in_preview(self, bom_list):
+            preview_win = Toplevel(self.root)
+            preview_win.title("BOM Preview")
+            preview_win.geometry("600x400")
+            preview_win.grab_set()
+
+            preview_win.protocol("WM_DELETE_WINDOW", lambda: (self.ledControl.turn_off_bom_leds(bom_list, self.ledControl), preview_win.destroy()))
+
+            tree = Treeview(preview_win, columns=("Digikey", "Quantity", "Found", "Current Count"), show="headings")
+            tree.heading("Digikey", text="Digikey Part #")
+            tree.heading("Quantity", text="# Used")
+            tree.heading("Found", text="Found")
+            tree.heading("Current Count", text="Current Count")
+            
+            tree.column("Digikey", width=150, anchor="w")
+            tree.column("Quantity", width=80, anchor="center")
+            tree.column("Found", width=80, anchor="center")
+            tree.column("Current Count", width=100, anchor="center")
+            tree.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            for row in bom_list:
+                tree.insert("", "end", values=(
+                    row["digikey"], row["quantity"], 
+                    "Yes" if row.get("found") else "No", 
+                    row.get("current_count", "N/A")
+                ))
+
+            def process_bom_callback(parent_win, bom_list):
+                """
+                Loops through each BOM row to collect additional usage and handles LED blinking,
+                then calls the backend to process the returned vials.
+                """
+                # Close the return window to avoid interference with dialogs.
+                parent_win.destroy()
+                
+                # Dictionary to store additional usage keyed by a unique component identifier (e.g., digikey).
+                additional_usage = {}
+                
+                for row in bom_list:
+                    location = row.get("location")
+                    digikey = row.get("digikey", "N/A")
+                    if not location:
+                        continue  # Skip if no location
+                    
+                    # Ask the user for additional components used (allowing blank input)
+                    additional_str = simpledialog.askstring(
+                        "Additional Components",
+                        f"For component {digikey} at location {location} \nEnter additional components used (or leave blank):", parent=self.root
+                    )
+                    try:
+                        additional = int(additional_str) if additional_str and additional_str.strip() != "" else 0
+                    except ValueError:
+                        additional = 0
+                    additional_usage[digikey] = additional  # Save in the dictionary
+                    
+                    # Start blinking the LED at this location.
+                    # (You might implement actual blinking by toggling the LED on and off; here we simply set it on.)
+                    self.ledControl.set_led_on(location, 0, 255, 0)
+                    
+                    # Show a message instructing the user to return the component.
+                    message = f"Return component {digikey} to {location}.\nPress OK when returned."
+                    messagebox.showinfo("Return Component", message, parent=self.root)
+                    
+                    # Stop blinking the LED.
+                    self.ledControl.turn_off_led(location)
+                
+                # Now pass the collected data to the backend for processing.
+                results = self.backend.process_returned_vials(bom_list, additional_usage)
+                
+                self.show_bom_results(results)
+
+            Button(preview_win, text="Return Components?", command=lambda: process_bom_callback(preview_win, bom_list)).pack(pady=10)
+                            
     def show_bom_results(self, results):
         result_win = Toplevel(self.root)
         result_win.title("BOM Processing Results")
         result_win.geometry("600x400")
+        result_win.lift()
         
         result_tree = Treeview(result_win, columns=("Part", "Remaining", "Status"), show="headings")
         result_tree.heading("Part", text="Digikey Part #")
@@ -837,7 +1059,6 @@ class Frontend:
             result_tree.insert("", "end", values=(res["part"], res["remaining"], res["status"]))
         
         messagebox.showinfo("BOM Processed", "BOM processing complete. Inventory has been updated.")
-
 
     def checkout_component(self, tree):
         # Ensure a part is selected in the Treeview.

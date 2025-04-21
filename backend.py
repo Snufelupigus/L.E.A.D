@@ -2,24 +2,46 @@ import json
 from tkinter import messagebox
 import os
 import time
+import shutil
+import difflib
+import datetime
+import threading
 from collections import OrderedDict
 import datetime
 
 class Backend:
-    def __init__(self, data_file="component_catalogue.json", changelog_file="changelog.txt"):
+    def __init__(self, data_file=None, changelog_file=None):
         script_dir = os.path.dirname(os.path.abspath(__file__))  # Get directory of backend.py
-        self.data_file = os.path.join(script_dir, "component_catalogue.json")  # Set full path
+
+        config_path = os.path.join(script_dir, "config.json")
+        config = {}
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r") as f:
+                    config = json.load(f)
+            except json.JSONDecodeError:
+                print("Error: Could not parse config.json. Using default file names.")
+        else:
+            print("Config file not found. Using default file names.")
+
+        if data_file is None:
+            data_file = config.get("COMPONENT_CATALOGUE", "component_catalogue.json")
+        if changelog_file is None:
+            changelog_file = config.get("CHANGELOG", "changelog.txt")
+
+        self.data_file = os.path.join(script_dir, data_file)  # Set full path
         self.changelog_file = os.path.join(script_dir, changelog_file)
+
         self.components = []
         self.load_components()
         self.max_leds = 300
         self.undo_stack = []
 
-        self.cache_dir = os.path.join(script_dir, "image_cache")
-        if not os.path.exists(self.cache_dir):
-            os.makedirs(self.cache_dir)
-        # OrderedDict to store {photo_url: (file_path, timestamp)}
-        self.image_cache = OrderedDict()
+        print("Using catalogue file:", self.data_file)
+
+        self.last_activity = datetime.datetime.now()
+
+        self.schedule_backup(interval_seconds=600)
 
     def load_components(self):
         try:
@@ -29,6 +51,7 @@ class Backend:
             self.components = []
 
     def save_components(self):
+        self.last_activity = datetime.datetime.now()
         with open(self.data_file, "w") as file:
             json.dump(self.components, file, indent=4)
             print(f"Data saved to: {os.path.abspath(self.data_file)}")
@@ -38,8 +61,9 @@ class Backend:
     def log_change(self, message):
         # Appends a timestamped log message to the changelog file.
         timestamp = datetime.datetime.now().isoformat()
+        catalogue_file = os.path.basename(self.data_file)
         with open(self.changelog_file, "a") as log_file:
-            log_file.write(f"{timestamp} - {message}\n")
+            log_file.write(f"{timestamp} - {message} - Saved to: {catalogue_file}.\n")
 
     def index_to_location(self, index):
         """
@@ -96,7 +120,7 @@ class Backend:
             #Check for duplicate locations
             location = location.upper()
             assigned = self.get_assigned_locations()
-            if location in assigned:
+            if location in assigned and "bin" not in location.lower():
                 # Location is already taken.
                 messagebox.showerror("Location Error", f"Location {location} is already assigned to another component.")
                 raise Exception(f"Location {location} is already assigned to another component.")
@@ -132,6 +156,7 @@ class Backend:
         return [
             comp for comp in self.components
             if any(query in str(value).lower() for value in comp["part_info"].values())
+            or any(query in str(value).lower() for value in comp["metadata"].values())
         ]
 
     def edit_component(self, index, updated_component):
@@ -178,35 +203,72 @@ class Backend:
         return parsed_data
 
     def check_duplicate(self, component):
+        """
+        Checks if the component is a duplicate of an existing one using fuzzy matching.
+        If a near duplicate is found, it pops up a message box asking the user if they meant the similar part.
+        If the user confirms, it updates the count of the existing component, logs the change, and returns False.
+        If no duplicate is found, it returns True.
+        
+        Parameters:
+            component (dict): A dictionary containing at least "part_info" with keys "part_number" and "count".
+        
+        Returns:
+            bool: True if the component is new (i.e. not a duplicate), False if it is a duplicate.
+        """
+        # Get the new part number (lowercased) and count.
         new_part_number = component["part_number"].strip().lower()
-        new_count = int(component.get("count", 0))
-        duplicate_index = None
+        try:
+            new_count = int(component.get("count", 0))
+        except ValueError:
+            new_count = 0
 
-        for i, comp in enumerate(self.components):
-            existing_part_number = comp["part_info"]["part_number"].strip().lower()
-            if existing_part_number == new_part_number:
-                duplicate_index = i
-                break
+        # Get all existing part numbers from the catalogue.
+        existing_components = self.get_all_components()
+        existing_parts = [
+            comp.get("part_info", {}).get("part_number", "").strip().lower() 
+            for comp in existing_components 
+            if comp.get("part_info", {}).get("part_number")
+        ]
 
-        if duplicate_index is not None:
-            # Component exists; update its count.
-            existing_component = self.components[duplicate_index]
-            try:
-                existing_count = int(existing_component["part_info"].get("count", 0))
-            except ValueError:
-                existing_count = 0
+        # Exact duplicate check.
+        if new_part_number in existing_parts:
+            for comp in existing_components:
+                if comp.get("part_info", {}).get("part_number", "").strip().lower() == new_part_number:
+                    try:
+                        existing_count = int(comp["part_info"].get("count", 0))
+                    except ValueError:
+                        existing_count = 0
+                    updated_count = existing_count + new_count
+                    comp["part_info"]["count"] = updated_count
+                    # Log the change.
+                    self.log_change(
+                        f"Updated component '{new_part_number}' count from {existing_count} to {updated_count} (exact duplicate)."
+                    )
+                    return False
 
-            updated_count = existing_count + new_count
-            existing_component["part_info"]["count"] = updated_count
-            self.components[duplicate_index] = existing_component
-            print(f"Updated component {new_part_number} count to {updated_count}")
-            self.log_change(f"Updated component '{new_part_number}': count increased from {existing_count} to {updated_count}.")
-            self.save_components()
-            return False
-        else:
-            # No duplicate found; add the new component.
-            self.log_change(f"Added new component '{new_part_number}' with count {new_count}.")
-            return True
+        # Fuzzy matching to check for near duplicates.
+        close_matches = difflib.get_close_matches(new_part_number, existing_parts, n=1, cutoff=0.8)
+        if close_matches:
+            response = messagebox.askyesno(
+                "Possible Duplicate",
+                f"Did you mean '{close_matches[0]}' instead of '{new_part_number}'?"
+            )
+            if response:
+                for comp in existing_components:
+                    if comp.get("part_info", {}).get("part_number", "").strip().lower() == close_matches[0]:
+                        try:
+                            existing_count = int(comp["part_info"].get("count", 0))
+                        except ValueError:
+                            existing_count = 0
+                        updated_count = existing_count + new_count
+                        comp["part_info"]["count"] = updated_count
+                        self.log_change(
+                            f"Updated component '{close_matches[0]}' count from {existing_count} to {updated_count} (matched '{new_part_number}')."
+                        )
+                        return False
+
+        # No duplicate found.
+        return True
 
     def get_low_stock_components(self):
         """
@@ -229,7 +291,7 @@ class Backend:
                 low_stock_components.append(comp)
         return low_stock_components
     
-    def process_bom(self, bom_list):
+    def process_bom_out(self, bom_list, board_name):
         """
         For each BOM row (a dictionary with at least:
             "digikey": Digi-Key part number,
@@ -257,6 +319,7 @@ class Backend:
                             current_count = 0
                         new_count = current_count - quantity_used
                         comp["part_info"]["count"] = new_count
+                        comp["metadata"]["in_use"] = f"Used for {board_name}"
                         results.append({
                             "part": digikey,
                             "remaining": new_count,
@@ -272,6 +335,68 @@ class Backend:
         self.save_components()  # Save updated inventory.
         return results
     
+    def process_returned_vials(self, bom_list, additional_usage):
+        """
+        Processes returned vials after checkout.
+
+        For each BOM row, locate the corresponding component in the catalogue (self.components)
+        by matching the digikey (part number), subtract the additional usage from its count,
+        and update the metadata 'in_use' field to "Available". Then save the updated catalogue.
+
+        Parameters:
+            bom_list (list): A list of BOM row dictionaries, each with at least the keys "digikey" and "location".
+            additional_usage (dict): A mapping from a unique component identifier (e.g., digikey)
+                                    to the number of additional components used (as an int).
+
+        Returns:
+            list: A list of result dictionaries containing the part identifier, updated count,
+                additional used, and status.
+        """
+        results = []
+        for row in bom_list:
+            digikey = row.get("digikey", "").strip()
+            additional = additional_usage.get(digikey, 0)
+            found = False
+
+            # Locate the component in the catalogue
+            for comp in self.components:
+                comp_digikey = comp.get("part_info", {}).get("part_number", "").strip()
+                if comp_digikey.lower() == digikey.lower():
+                    found = True
+                    try:
+                        current_count = int(comp["part_info"].get("count", 0))
+                    except ValueError:
+                        current_count = 0
+
+                    new_count = current_count - additional
+                    comp["part_info"]["count"] = new_count
+
+                    # Update the metadata: set "in_use" to "Available"
+                    if "metadata" in comp:
+                        comp["metadata"]["in_use"] = "Available"
+                    else:
+                        comp["metadata"] = {"in_use": "Available"}
+
+                    results.append({
+                        "part": digikey,
+                        "remaining": new_count,
+                        "additional_used": additional,
+                        "status": "Returned"
+                    })
+                    break
+
+            if not found:
+                results.append({
+                    "part": digikey,
+                    "remaining": "N/A",
+                    "additional_used": additional,
+                    "status": "Component not found in catalogue"
+                })
+
+        # Save the updated catalogue to file.
+        self.save_components()
+        return results
+
     def undo_delete(self):
         """
         Restores the last deleted component, if available.
@@ -289,3 +414,44 @@ class Backend:
             self.log_change(f"Restored component at index {index} (Part Number: {part_number}).")
             return True
         return False
+
+    def schedule_backup(self, interval_seconds=3600):
+        """
+        Schedules the backup_catalogue method to run every interval_seconds.
+        Uses threading.Timer to perform the backup in a separate thread.
+        """
+        def backup_wrapper():
+            now = datetime.datetime.now()
+            inactivity = now - self.last_activity
+            self.backup_catalogue()
+            # Reschedule the next backup and check for inactivity
+            if inactivity < datetime.timedelta(minutes=30):
+                self.backup_catalogue()
+                # Reschedule the next backup.
+                threading.Timer(interval_seconds, backup_wrapper).start()
+            else:
+                print("Autobackup deactivated due to inactivity (no changes for over 30 minutes).")
+        
+        # Schedule the first backup
+        threading.Timer(interval_seconds, backup_wrapper).start()
+
+    def backup_catalogue(self):
+        """
+        Creates a backup copy of the current catalogue.
+        The backup is stored in a "backups" folder in the same directory as the catalogue.
+        The backup file is named with a timestamp appended.
+        """
+        catalogue_path = self.data_file
+        backup_dir = os.path.join(os.path.dirname(catalogue_path), "backups")
+        if not os.path.exists(backup_dir):
+            os.makedirs(backup_dir)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        base = os.path.basename(catalogue_path)
+        name, ext = os.path.splitext(base)
+        backup_filename = f"{name}_{timestamp}{ext}"
+        backup_path = os.path.join(backup_dir, backup_filename)
+        try:
+            shutil.copy2(catalogue_path, backup_path)
+            print(f"Backup created: {backup_path}")
+        except Exception as e:
+            print("Error creating backup:", e)

@@ -1,19 +1,51 @@
 import serial
 import time
+import json
+import os
 from tkinter import messagebox
 
 class LedController:
     def __init__(self):
         self.num_leds = 104
-        self.recent_leds = set()  # Keep track of LEDs that were turned on.
+        self.recent_leds = set()
+        self.ser = None
+        self.port = None
+        self.baudrate = 9600
+        self.timeout = 1
+
+        self.load_config()
+        self.connect_serial()
+
+    def load_config(self):
+        """Load serial config from config.json"""
+        config_path = os.path.join(os.path.dirname(__file__), "config.json")
         try:
-            self.ser = serial.Serial(port="COM7", baudrate=9600, timeout=1)
-            time.sleep(1)  # Allow time for the Arduino to initialize
-            self.turn_off_all()  # Optionally turn off all LEDs at startup.
+            with open(config_path, "r") as file:
+                config = json.load(file)
+                serial_config = config.get("SERIAL", {})
+                self.port = serial_config.get("PORT", "")
+                self.baudrate = serial_config.get("BAUDRATE", 9600)
+                self.timeout = serial_config.get("TIMEOUT", 1)
+        except Exception as e:
+            print(f"Error loading config file: {e}")
+            messagebox.showerror("Config Error", "Failed to load serial settings from config.json")
+
+    def connect_serial(self):
+        """Establish serial connection with LED controller"""
+        try:
+            if not self.port:
+                raise ValueError("Serial port not defined in config.json")
+            self.ser = serial.Serial(port=self.port, baudrate=self.baudrate, timeout=self.timeout)
+            time.sleep(0.5)  # Let Arduino initialize
+            self.turn_off_all()
         except Exception as e:
             print(f"Error opening serial port: {e}")
-            messagebox.showerror("LED System Error", f"LED Controller Failed To Load")
+            messagebox.showerror("LED System Error", "LED Controller Failed To Load")
             self.ser = None
+
+    def reconnect(self):
+        print("Attempting to reconnect to LED controller...")
+        self.connect_serial()
 
     def location_to_index(self, location_code):
         if not location_code:
@@ -26,16 +58,11 @@ class LedController:
             return None
         if not col_part or len(col_part) != 1:
             return None
-        
-        if row%2==0:
-            # odd row: alphabetical order forward (A=0, B=1, ...)
+        if row % 2 == 0:
             col_index = 25 - (ord(col_part) - ord('A'))
         else:
-            # even row: alphabetical order reversed (A=25, B=24, ..., Z=0)
             col_index = ord(col_part) - ord('A')
-        
-        index = (row - 1) * 26 + col_index
-        return index
+        return (row - 1) * 26 + col_index
 
     def set_led_on(self, location_code, red, green, blue):
         index = self.location_to_index(location_code)
@@ -43,48 +70,45 @@ class LedController:
             return
         command = f"SET {index} {red} {green} {blue}\n"
         self.ser.write(command.encode('utf-8'))
-        # Record this LED index as recently referenced.
         self.recent_leds.add(index)
 
     def turn_off_recent(self):
         if self.ser is None:
             return
         for index in self.recent_leds:
-            command = f"SET {index} 0 0 0\n"
-            self.ser.write(command.encode('utf-8'))
+            self.ser.write(f"SET {index} 0 0 0\n".encode('utf-8'))
         self.ser.flush()
-        # Clear the collection after turning them off.
         self.recent_leds.clear()
 
     def turn_off_all(self):
         if self.ser is None:
             return
         for i in range(self.num_leds):
-            command = f"SET {i} 0 0 0\n"
-            self.ser.write(command.encode('utf-8'))
+            self.ser.write(f"SET {i} 0 0 0\n".encode('utf-8'))
         self.ser.flush()
-        # Optionally, clear recent_leds as well.
 
     def turn_off_led(self, location_code):
         index = self.location_to_index(location_code)
         if index is None or self.ser is None:
             return
-        command = f"SET {index} 0 0 0\n"
-        self.ser.write(command.encode('utf-8'))
+        self.ser.write(f"SET {index} 0 0 0\n".encode('utf-8'))
         self.ser.flush()
-        # Remove this LED index from the recent_leds set if it was recorded.
-        if index in self.recent_leds:
-            self.recent_leds.remove(index)
+        self.recent_leds.discard(index)
 
     def turn_off_bom_leds(self, bom_list, led_controller):
-        """
-        Turns off only the LEDs whose locations are present in the BOM list.
-        
-        Parameters:
-        - bom_list: A list of dictionaries for BOM rows, each expected to contain a key "location".
-        - led_controller: An instance of LedController used to send commands to the LEDs.
-        """
-        # Collect unique locations from BOM rows that are marked as found and have a valid location.
         locations = {row.get("location") for row in bom_list if row.get("found") and row.get("location")}
         for location in locations:
+            time.sleep(0.05)
             led_controller.turn_off_led(location)
+
+    def turn_off_all_assigned_leds(self, backend):
+        assigned_locations = backend.get_assigned_locations()
+        if self.ser is None:
+            return
+        for loc in assigned_locations:
+            time.sleep(0.05)
+            index = self.location_to_index(loc)
+            if index is not None:
+                self.ser.write(f"SET {index} 0 0 0\n".encode('utf-8'))
+                self.recent_leds.discard(index)
+        self.ser.flush()
