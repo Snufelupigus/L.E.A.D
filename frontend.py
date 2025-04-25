@@ -81,9 +81,9 @@ class Frontend:
             self.show_home()
 
     def clear_frame(self):
-
         self.ledControl.turn_off_recent()
         if self.current_frame is not None:
+            self.current_frame.unbind_all("<Return>")
             self.current_frame.destroy()
 
     def show_home(self):
@@ -285,7 +285,16 @@ class Frontend:
                 return
             
             if self.backend.check_duplicate(component_data)== False: 
-                messagebox.showinfo("Found Duplicate", f"Component {component_data['part_number']} already exists. Added {component_data['count']} units.")
+                messagebox.showinfo("Found Duplicate", f"Component {component_data['part_number']} already exists.\nAdded {component_data['count']} units.")
+
+                existing = next((c for c in self.backend.get_all_components()if c["part_info"]["part_number"].strip().lower()== component_data["part_number"].strip().lower()), None)
+
+                if existing:
+                    loc = existing["part_info"]["location"]
+                    self.ledControl.set_led_on(loc, 0, 255, 0)
+                    messagebox.showinfo("Fill Vial", f"Fill vial at {loc}.")
+
+                self.ledControl.turn_off_led(loc)
                 update_add_tree()
                 
                 for key, (_, widget) in fields.items():
@@ -293,6 +302,7 @@ class Frontend:
                         widget.delete(0, END)
                     else:
                         component_type_var.set("Other")
+
                 return
             
             fetch_digikey_data(self)
@@ -361,15 +371,30 @@ class Frontend:
                         #Create dic for duplicate checking
                         component = {"part_number":response["part_info"]["part_number"], "count":response["part_info"]["count"]}
 
-                        if self.backend.check_duplicate(component) == False: 
-                            messagebox.showinfo("Found Duplicate", f"Component {component['part_number']} already exists. Added {component['count']} units.")
-                            update_add_tree()
+                        if self.backend.check_duplicate(component)== False: 
+                            messagebox.showinfo("Found Duplicate", f"Component {component['part_number']} already exists.\nAdded {component['count']} units.")
 
+                            existing = next(
+                                (c for c in self.backend.get_all_components()
+                                if c["part_info"]["part_number"].strip().lower()
+                                    == component["part_number"].strip().lower()),
+                                None
+                            )
+                            print(existing)
+                            if existing:
+                                loc = existing["part_info"]["location"]
+                                self.ledControl.set_led_on(loc, 0, 255, 0)
+                                messagebox.showinfo("Fill Vial", f"Fill vial at {loc}.")
+
+                            self.ledControl.turn_off_led(loc)
+                            update_add_tree()
+                            
                             for key, (_, widget) in fields.items():
                                 if isinstance(widget, Entry):
                                     widget.delete(0, END)
                                 else:
                                     component_type_var.set("Other")
+
                             return
                 
                         self.backend.add_component(response)
@@ -397,19 +422,37 @@ class Frontend:
             barcode_entry.pack(pady=10)
             barcode_entry.focus_set()
 
-            def process_barcode(event):
+            def process_barcode():
                 """Detects barcode input and sends it to DigiKey API."""
                 barcode = barcode_var.get().strip()
 
-                barcode_data=self.backend.barcode_decoder(barcode)
+                try:
+                    barcode_data=self.backend.barcode_decoder(barcode)
+                except Exception as e:
+                    return False
 
                 print(barcode_data)
                 if self.backend.check_duplicate(barcode_data)== False: 
-                            print("found duplicate")
-                            messagebox.showinfo("Found Duplicate:", barcode_data['part_number']) 
-                            update_add_tree()
-                            return
-                print("didnt")
+                    messagebox.showinfo("Found Duplicate", f"Component {barcode_data['part_number']} already exists."f"Added {barcode_data['count']} units.")
+
+                    existing = next((c for c in self.backend.get_all_components()if c["part_info"]["part_number"].strip().lower()== barcode_data["part_number"].strip().lower()), None)
+
+                    if existing:
+                        loc = existing["part_info"]["location"]
+                        self.ledControl.set_led_on(loc, 0, 255, 0)
+                        messagebox.showinfo("Fill Vial", f"Fill vial at {loc}.")
+
+                    self.ledControl.turn_off_led(loc)
+                    update_add_tree()
+                    
+                    for key, (_, widget) in fields.items():
+                        if isinstance(widget, Entry):
+                            widget.delete(0, END)
+                        else:
+                            component_type_var.set("Other")
+
+                    return True
+
                 barcode_window.destroy()  # Close the window
 
                 extraInfo = Toplevel(self.root)
@@ -432,9 +475,16 @@ class Frontend:
                         fetch_digikey_data(self, barcode_data)
                 
                 Button(extraInfo, text="Save", command= low_stock_entry_handeling).pack(pady= 5)
+                return True
+
+            def on_enter(event):
+                if process_barcode():
+                    barcode_entry.destroy()
+                else:
+                    barcode_entry.focus_set()
 
             # Bind the Enter key to process barcode input
-            barcode_entry.bind("<Return>", process_barcode)
+            barcode_entry.bind("<Return>", on_enter)
 
         def bulk_add(self):
             bulk_window = Toplevel(self.root)
@@ -542,7 +592,7 @@ class Frontend:
         Button(self.current_frame, text="Add Barcode", command=barcode_scan).grid(row=len(fields), column=2, columnspan=2, padx=10, pady=5, sticky= "w")
         Button(self.current_frame, text="Bulk Scan", command=lambda: bulk_add(self)).grid(row=len(fields), column=3, columnspan=2, padx=10, pady=5, sticky= "w")
 
-        self.root.bind("<Return>", lambda event: add_component())
+        self.current_frame.bind_all("<Return>", lambda event: add_component())
         
         # Table of components
         add_tree = Treeview(self.current_frame, columns=("Part Number", "Manufacturer Number", "Location", "Count", "Type"), show="headings")
@@ -1091,7 +1141,7 @@ class Frontend:
         qty_entry.pack(pady=5)
         qty_entry.focus_set()
 
-        def submit_qty():
+        def submit_qty(event=None):
             if current_count == 0:
                 messagebox.showinfo(
                   "Out of Stock",
@@ -1099,22 +1149,21 @@ class Frontend:
                 )
                 checkout_win.destroy()
                 return
-
-            if qty > current_count:
-                messagebox.showerror("Error", "Not enough components in stock")
-                return
-            
+    
             qty_str = qty_entry.get().strip()
             try:
                 qty = int(qty_str)
             except ValueError:
                 messagebox.showerror("Error", "Please enter a valid integer")
+                qty_entry.focus_set()
                 return
             if qty <= 0:
                 messagebox.showerror("Error", "Quantity must be positive")
+                qty_entry.focus_set()
                 return
             if qty > current_count:
-                messagebox.showerror("Error", "Not enough components in stock")
+                messagebox.showerror("Error", f"Not enough components in stock, only {current_count} available.")
+                qty_entry.focus_set()
                 return
 
             checkout_win.destroy()  # Close the quantity entry window
@@ -1145,6 +1194,7 @@ class Frontend:
             lit_win.geometry("300x150")
             Label(lit_win, text=f"Component {part_number} at {location} is lit up.").pack(pady=20)
             Label(lit_win, text="Press Enter or click OK when replaced.").pack(pady=10)
+            lit_win.focus_set()
             
             def confirm_replaced(event=None):
                 lit_win.destroy()
@@ -1172,6 +1222,7 @@ class Frontend:
             lit_win.bind("<Return>", confirm_replaced)
             lit_win.protocol("WM_DELETE_WINDOW", lambda: (self.ledControl.turn_off_recent(), lit_win.destroy()))
             
+        checkout_win.bind("<Return>", submit_qty)
         Button(checkout_win, text="Submit", command=submit_qty).pack(pady=10)
 
     def undo_last_deletion(self):

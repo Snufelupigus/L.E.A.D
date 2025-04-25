@@ -182,8 +182,9 @@ class Backend:
     def barcode_decoder(self, barcode):
         # Validate and remove header
         if not barcode.startswith("[)>"):
+            messagebox.showwarning("Barcode Format", f"Invalid barcode format, please try again")
             raise ValueError("Invalid barcode format")
-        
+
         remaining = barcode[6:]
 
         part_number = remaining.split("1P")
@@ -244,6 +245,8 @@ class Backend:
                     self.log_change(
                         f"Updated component '{new_part_number}' count from {existing_count} to {updated_count} (exact duplicate)."
                     )
+
+                    self.save_components()
                     return False
 
         # Fuzzy matching to check for near duplicates.
@@ -265,6 +268,7 @@ class Backend:
                         self.log_change(
                             f"Updated component '{close_matches[0]}' count from {existing_count} to {updated_count} (matched '{new_part_number}')."
                         )
+                        self.save_components()
                         return False
 
         # No duplicate found.
@@ -340,7 +344,6 @@ class Backend:
         self.save_components()
         return results
 
-    
     def process_returned_vials(self, bom_list, additional_usage):
         """
         Processes returned vials after checkout.
