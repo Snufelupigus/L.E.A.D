@@ -423,6 +423,7 @@ class Frontend:
             barcode_entry.focus_set()
 
             def process_barcode():
+                barcode_entry.destroy()
                 """Detects barcode input and sends it to DigiKey API."""
                 barcode = barcode_var.get().strip()
 
@@ -441,8 +442,8 @@ class Frontend:
                         loc = existing["part_info"]["location"]
                         self.ledControl.set_led_on(loc, 0, 255, 0)
                         messagebox.showinfo("Fill Vial", f"Fill vial at {loc}.")
+                        self.ledControl.turn_off_led(loc)
 
-                    self.ledControl.turn_off_led(loc)
                     update_add_tree()
                     
                     for key, (_, widget) in fields.items():
