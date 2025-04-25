@@ -285,24 +285,13 @@ class Frontend:
                 return
             
             if self.backend.check_duplicate(component_data)== False: 
-                messagebox.showinfo("Found Duplicate", f"Component {component_data['part_number']} already exists.\nAdded {component_data['count']} units.")
-
-                existing = next((c for c in self.backend.get_all_components()if c["part_info"]["part_number"].strip().lower()== component_data["part_number"].strip().lower()), None)
-
-                if existing:
-                    loc = existing["part_info"]["location"]
-                    self.ledControl.set_led_on(loc, 0, 255, 0)
-                    messagebox.showinfo("Fill Vial", f"Fill vial at {loc}.")
-
-                self.ledControl.turn_off_led(loc)
+                self.ledControl.turn_off_recent()
                 update_add_tree()
-                
                 for key, (_, widget) in fields.items():
                     if isinstance(widget, Entry):
                         widget.delete(0, END)
                     else:
                         component_type_var.set("Other")
-
                 return
             
             fetch_digikey_data(self)
@@ -372,21 +361,7 @@ class Frontend:
                         component = {"part_number":response["part_info"]["part_number"], "count":response["part_info"]["count"]}
 
                         if self.backend.check_duplicate(component)== False: 
-                            messagebox.showinfo("Found Duplicate", f"Component {component['part_number']} already exists.\nAdded {component['count']} units.")
-
-                            existing = next(
-                                (c for c in self.backend.get_all_components()
-                                if c["part_info"]["part_number"].strip().lower()
-                                    == component["part_number"].strip().lower()),
-                                None
-                            )
-                            print(existing)
-                            if existing:
-                                loc = existing["part_info"]["location"]
-                                self.ledControl.set_led_on(loc, 0, 255, 0)
-                                messagebox.showinfo("Fill Vial", f"Fill vial at {loc}.")
-
-                            self.ledControl.turn_off_led(loc)
+                            self.ledControl.turn_off_recent()
                             update_add_tree()
                             
                             for key, (_, widget) in fields.items():
@@ -423,7 +398,6 @@ class Frontend:
             barcode_entry.focus_set()
 
             def process_barcode():
-                barcode_entry.destroy()
                 """Detects barcode input and sends it to DigiKey API."""
                 barcode = barcode_var.get().strip()
 
@@ -432,18 +406,8 @@ class Frontend:
                 except Exception as e:
                     return False
 
-                print(barcode_data)
                 if self.backend.check_duplicate(barcode_data)== False: 
-                    messagebox.showinfo("Found Duplicate", f"Component {barcode_data['part_number']} already exists."f"Added {barcode_data['count']} units.")
-
-                    existing = next((c for c in self.backend.get_all_components()if c["part_info"]["part_number"].strip().lower()== barcode_data["part_number"].strip().lower()), None)
-
-                    if existing:
-                        loc = existing["part_info"]["location"]
-                        self.ledControl.set_led_on(loc, 0, 255, 0)
-                        messagebox.showinfo("Fill Vial", f"Fill vial at {loc}.")
-                        self.ledControl.turn_off_led(loc)
-
+                    self.ledControl.turn_off_recent()
                     update_add_tree()
                     
                     for key, (_, widget) in fields.items():
@@ -453,8 +417,6 @@ class Frontend:
                             component_type_var.set("Other")
 
                     return True
-
-                barcode_window.destroy()  # Close the window
 
                 extraInfo = Toplevel(self.root)
                 extraInfo.title("Barcode Info")
@@ -480,11 +442,13 @@ class Frontend:
 
             def on_enter(event):
                 if process_barcode():
-                    barcode_entry.destroy()
+                    barcode_window.destroy()
+                    return
                 else:
-                    barcode_entry.focus_set()
+                    barcode_window.focus_set()
 
             # Bind the Enter key to process barcode input
+            self.current_frame.unbind_all("<Return>")
             barcode_entry.bind("<Return>", on_enter)
 
         def bulk_add(self):

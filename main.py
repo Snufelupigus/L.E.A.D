@@ -7,6 +7,8 @@ digikeyAPI = Digikey_API_Call()
 
 ledControl = LedController()
 
-backend = Backend()
+Backend(ledControl)
+
+backend = Backend(ledControl)
 
 Frontend(backend, digikeyAPI, ledControl) 

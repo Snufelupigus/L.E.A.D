@@ -10,7 +10,9 @@ from collections import OrderedDict
 import datetime
 
 class Backend:
-    def __init__(self, data_file=None, changelog_file=None):
+    def __init__(self, ledControl, data_file=None, changelog_file=None):
+        self.ledControl = ledControl
+
         script_dir = os.path.dirname(os.path.abspath(__file__))  # Get directory of backend.py
 
         config_path = os.path.join(script_dir, "config.json")
@@ -241,6 +243,12 @@ class Backend:
                         existing_count = 0
                     updated_count = existing_count + new_count
                     comp["part_info"]["count"] = updated_count
+
+                    messagebox.showinfo("Found Duplicate", f"Component {comp['part_info']['part_number']} already exists.\nAdded {comp['part_info']['count']} units.")
+                    loc = comp["part_info"]["location"]
+                    self.ledControl.set_led_on(loc, 0, 255, 0)
+                    messagebox.showinfo("Fill Vial", f"Fill vial at {loc}.")
+
                     # Log the change.
                     self.log_change(
                         f"Updated component '{new_part_number}' count from {existing_count} to {updated_count} (exact duplicate)."
@@ -265,6 +273,12 @@ class Backend:
                             existing_count = 0
                         updated_count = existing_count + new_count
                         comp["part_info"]["count"] = updated_count
+
+                        messagebox.showinfo("Found Duplicate", f"Component {comp['part_info']['part_number']} already exists.\nAdded {comp['part_info']['count']} units.")
+                        loc = comp["part_info"]["location"]
+                        self.ledControl.set_led_on(loc, 0, 255, 0)
+                        messagebox.showinfo("Fill Vial", f"Fill vial at {loc}.")
+
                         self.log_change(
                             f"Updated component '{close_matches[0]}' count from {existing_count} to {updated_count} (matched '{new_part_number}')."
                         )
