@@ -2,6 +2,7 @@ import json
 from tkinter import messagebox
 import os
 import time
+import csv
 import shutil
 import difflib
 import datetime
@@ -309,6 +310,60 @@ class Backend:
                 low_stock_components.append(comp)
         return low_stock_components
     
+    def parse_bom(self, file_path):
+        """
+        Read a BOM CSV, drop any rows with an empty Part column
+        or a “Total” footer, and annotate each row with:
+           - found:   True/False
+           - location
+           - current_count
+        Returns a list of dicts ready for display.
+        """
+        bom_list = []
+        # adjust delimiter or encoding if needed
+        with open(file_path, newline='') as f:
+            reader = csv.reader(f)
+            header = next(reader, None)  # skip header line
+            for cols in reader:
+                # assume columns: Part, Digikey#, Manufacturer#, Price, # of Parts
+                if len(cols) < 5:
+                    continue
+                part, digikey, manufacturer, price, qty = [c.strip() for c in cols[:5]]
+                # skip blank part rows
+                if not part:
+                    continue
+                # stop at a “Total” row if they label it in Part
+                if part.lower().startswith("total"):
+                    break
+
+                # look up this digikey in inventory
+                found = False
+                location = None
+                current_count = None
+                for comp in self.components:
+                    pn = comp["part_info"]["part_number"].strip().lower()
+                    if pn == digikey.lower():
+                        found = True
+                        location = comp["part_info"].get("location")
+                        try:
+                            current_count = int(comp["part_info"].get("count", 0))
+                        except ValueError:
+                            current_count = None
+                        break
+
+                bom_list.append({
+                    "part":          part,
+                    "digikey":       digikey,
+                    "manufacturer":  manufacturer,
+                    "price":         price,
+                    "quantity":      qty,
+                    "found":         found,
+                    "location":      location,
+                    "current_count": current_count
+                })
+
+        return bom_list
+
     def process_bom_out(self, bom_list, board_name):
         """
         For each BOM row (dict with "digikey", "quantity", "found"):
@@ -419,6 +474,69 @@ class Backend:
         # Save the updated catalogue to file.
         self.save_components()
         return results
+
+    def checkout(self, part_number: str, qty: int):
+        """
+        Attempt to subtract `qty` from the component with `part_number`.
+        Returns a dict:
+          {
+            "success": bool,
+            "message": str,
+            "location": str or None,
+            "new_count": int or None
+          }
+        """
+        key = part_number.strip().lower()
+        # find component
+        for comp in self.components:
+            if comp["part_info"]["part_number"].strip().lower() == key:
+                break
+        else:
+            return {
+                "success": False,
+                "message": f"Component '{part_number}' not found.",
+                "location": None,
+                "new_count": None
+            }
+
+        # parse current count
+        try:
+            current = int(comp["part_info"].get("count", 0))
+        except ValueError:
+            return {
+                "success": False,
+                "message": f"Invalid count for '{part_number}'.",
+                "location": None,
+                "new_count": None
+            }
+
+        # validate qty
+        if qty <= 0:
+            return {
+                "success": False,
+                "message": "Quantity must be positive.",
+                "location": None,
+                "new_count": current
+            }
+        if qty > current:
+            return {
+                "success": False,
+                "message": "Not enough components in stock.",
+                "location": comp["part_info"].get("location"),
+                "new_count": current
+            }
+
+        # perform checkout
+        new_count = current - qty
+        comp["part_info"]["count"] = new_count
+        self.save_components()
+
+        return {
+            "success":   True,
+            "message":   f"Checked out {qty}× '{part_number}'. New count: {new_count}.",
+            "location":  comp["part_info"].get("location"),
+            "new_count": new_count
+        }
 
     def undo_delete(self):
         """

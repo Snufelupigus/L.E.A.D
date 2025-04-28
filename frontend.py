@@ -429,6 +429,8 @@ class Frontend:
 
                 extraInfo.focus_set()
 
+                extraInfo.bind("<Return>", on_enter)
+
                 def low_stock_entry_handeling():
                     low_stock = int(low_stock_var.get())
                     extraInfo.destroy()  # Close the window
@@ -448,8 +450,7 @@ class Frontend:
                     barcode_window.focus_set()
 
             # Bind the Enter key to process barcode input
-            self.current_frame.unbind_all("<Return>")
-            barcode_entry.bind("<Return>", on_enter)
+            barcode_window.bind("<Return>", on_enter)
 
         def bulk_add(self):
             bulk_window = Toplevel(self.root)
@@ -557,7 +558,7 @@ class Frontend:
         Button(self.current_frame, text="Add Barcode", command=barcode_scan).grid(row=len(fields), column=2, columnspan=2, padx=10, pady=5, sticky= "w")
         Button(self.current_frame, text="Bulk Scan", command=lambda: bulk_add(self)).grid(row=len(fields), column=3, columnspan=2, padx=10, pady=5, sticky= "w")
 
-        self.current_frame.bind_all("<Return>", lambda event: add_component())
+        for _, (_, entry_widget) in fields.items(): entry_widget.bind("<Return>", lambda event: add_component())
         
         # Table of components
         add_tree = Treeview(self.current_frame, columns=("Part Number", "Manufacturer Number", "Location", "Count", "Type"), show="headings")
@@ -829,80 +830,23 @@ class Frontend:
         except Exception as e:
             messagebox.showerror("Export Error", f"Failed to export file:\n{e}")
 
-    def process_bom_file(self, button):
+    def process_bom_file(self, mode):
         file_path = askopenfilename(
             title="Select BOM File",
-            filetypes=[("CSV Files", "*.csv"), ("Text Files", "*.txt"), ("All Files", "*.*")]
+            filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")]
         )
         if not file_path:
             messagebox.showerror("Error", "No file selected!")
             return
 
-        file_name = os.path.basename(file_path)
-        index = file_name.find(" BOM")
-        
-        if index != -1:
-            board_name = file_name[:index]
-        else:
-            board_name = file_name
-
         try:
-            with open(file_path, "r") as f:
-                lines = f.read().strip().splitlines()
+            bom_list = self.backend.parse_bom(file_path)
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to read file:\n{e}")
+            messagebox.showerror("Error reading BOM", str(e))
             return
 
-        bom_list = []
-        for line in lines[1:]:
-            parts = [p.strip() for p in line.split(",")]
-
-            # — Skip any row where the Part column is empty —
-            if not parts or not parts[0]:
-                continue
-
-            # Now ensure you still have at least 5 columns
-            if len(parts) < 5:
-                continue
-
-            bom_list.append({
-                "part": parts[0],
-                "digikey": parts[1],
-                "manufacturer": parts[2],
-                "price": parts[3],
-                "quantity": parts[4]
-            })
-
-
-        if not bom_list:
-            messagebox.showerror("Error", "No valid BOM rows found in the file!")
-            return
-
-        # For each BOM row, check if the component exists in the catalogue.
-        for row in bom_list:
-            found = False
-            for comp in self.backend.get_all_components():
-                comp_digikey = comp["part_info"].get("part_number", "").strip()
-                if comp_digikey.lower() == row["digikey"].lower():
-                    found = True
-                    row["location"] = comp["part_info"].get("location", None)
-                    try:
-                        row["current_count"] = int(comp["part_info"].get("count", 0))
-                    except ValueError:
-                        row["current_count"] = 0
-                    break
-            row["found"] = found
-
-        for row in bom_list:
-            try:
-                qty = int(row.get("quantity",0))
-                curr = int(row.get("current_count",0))
-            except ValueError:
-                qty = curr = 0
-            row["out_of_stock"] = row.get("found", False) and (curr < qty)
-
-        if button =="out":
-            self.bom_out_preview(bom_list, board_name)
+        if mode == "out":
+            self.bom_out_preview(bom_list, board_name=os.path.basename(file_path))
         else:
             self.bom_in_preview(bom_list)
 
@@ -920,11 +864,23 @@ class Frontend:
             tree.column(col, width=100, anchor="center")
         tree.column("Digikey", width=150, anchor="w")
 
-        tree.tag_configure('out_of_stock', background='tomato')
+        tree.tag_configure('missing', background='tomato')
+        tree.tag_configure('out_of_stock', background='yellow')
 
         # insert rows, now including location
         for row in bom_list:
-            tags = ('out_of_stock',) if row.get("out_of_stock") else ()
+            try:
+                qty = int(row.get("quantity", 0))
+            except ValueError:
+                qty = 0
+            current = row.get("current_count", 0) or 0
+
+            if not row.get("found"):
+                tags = ('missing',)
+            elif current < qty:
+                tags = ('out_of_stock',)
+            else:
+                tags = ()
             tree.insert("", "end",
                         values=(
                             row["digikey"],
@@ -1081,23 +1037,14 @@ class Frontend:
         messagebox.showinfo("BOM Processed", "BOM processing complete. Inventory has been updated.")
 
     def checkout_component(self, tree):
-        # Ensure a part is selected in the Treeview.
-        selected_item = tree.selection()
-        if not selected_item:
+        selected = tree.selection()
+        if not selected:
             messagebox.showerror("Error", "No component selected!")
             return
 
-        # Retrieve selected component details.
-        values = tree.item(selected_item, "values")
-        # Expected values order: [Part Number, Manufacturer Number, Location, Count, Type]
-        part_number = values[0]
-        location = values[2]
-        try:
-            current_count = int(values[3])
-        except ValueError:
-            current_count = 0
+        part_number = tree.item(selected[0], "values")[0]
 
-        # Create a window to ask for the quantity to remove.
+        # Prompt for quantity
         checkout_win = Toplevel(self.root)
         checkout_win.title("Checkout Part")
         checkout_win.geometry("300x150")
@@ -1107,72 +1054,38 @@ class Frontend:
         qty_entry.focus_set()
 
         def submit_qty(event=None):
-            if current_count == 0:
-                messagebox.showinfo(
-                  "Out of Stock",
-                  f"Component {part_number} is currently out of stock and cannot be removed."
-                )
-                checkout_win.destroy()
-                return
-    
-            qty_str = qty_entry.get().strip()
             try:
-                qty = int(qty_str)
+                qty = int(qty_entry.get().strip())
             except ValueError:
                 messagebox.showerror("Error", "Please enter a valid integer")
-                qty_entry.focus_set()
-                return
-            if qty <= 0:
-                messagebox.showerror("Error", "Quantity must be positive")
-                qty_entry.focus_set()
-                return
-            if qty > current_count:
-                messagebox.showerror("Error", f"Not enough components in stock, only {current_count} available.")
-                qty_entry.focus_set()
                 return
 
-            checkout_win.destroy()  # Close the quantity entry window
-
-            # Find the component index in the backend by part number.
-            comp_index = None
-            components = self.backend.get_all_components()
-            for i, comps in enumerate(components):
-                if comps["part_info"].get("part_number", "").strip().lower() == part_number.lower():
-                    comp_index = i
-                    break
-            if comp_index is None:
-                messagebox.showerror("Error", "Component not found in backend")
+            checkout_win.destroy()
+            result = self.backend.checkout(part_number, qty)
+            if not result["success"]:
+                messagebox.showerror("Checkout Failed", result["message"])
                 return
 
-            # Update the component's count.
-            comps = components[comp_index]
-            new_count = current_count - qty
-            comps["part_info"]["count"] = new_count
+            loc = result["location"]
+            # Light the LED
+            self.ledControl.set_led_on(loc, 0, 255, 0)
 
-            # Light up the LED for the component's location.
-            # (Assumes the location code is stored in the tree as shown.)
-            self.ledControl.set_led_on(location, 0, 255, 0)  # For example, green
-
-            # Pop up a window that informs the user the component is lit.
+            # Inform user and wait for replacement
             lit_win = Toplevel(self.root)
             lit_win.title("Component Lit Up")
             lit_win.geometry("300x150")
-            Label(lit_win, text=f"Component {part_number} at {location} is lit up.").pack(pady=20)
+            Label(lit_win, text=result["message"]).pack(pady=20)
             Label(lit_win, text="Press Enter or click OK when replaced.").pack(pady=10)
             lit_win.focus_set()
-            
+
             def confirm_replaced(event=None):
                 lit_win.destroy()
-                # Ask for confirmation that the vial has been replaced.
                 if messagebox.askyesno("Confirm Replacement", "Have you replaced the vial?"):
-                    # Turn off the LED for that specific location.
-                    self.ledControl.turn_off_led(location)
-                    # Update the backend with the new count.
-                    self.backend.edit_component(comp_index, comps)
-                    messagebox.showinfo("Success", f"Checkout complete.\nNew count: {new_count}")
-                    # Refresh the treeview.
-                    for row in tree.get_children():
-                        tree.delete(row)
+                    self.ledControl.turn_off_led(loc)
+                    messagebox.showinfo("Success", result["message"])
+                    # Refresh the treeview
+                    for item in tree.get_children():
+                        tree.delete(item)
                     for comp in self.backend.get_all_components():
                         tree.insert("", "end", values=(
                             comp["part_info"]["part_number"],
@@ -1182,11 +1095,10 @@ class Frontend:
                             comp["part_info"]["type"]
                         ))
 
-            
             Button(lit_win, text="OK", command=confirm_replaced).pack(pady=10)
             lit_win.bind("<Return>", confirm_replaced)
             lit_win.protocol("WM_DELETE_WINDOW", lambda: (self.ledControl.turn_off_recent(), lit_win.destroy()))
-            
+
         checkout_win.bind("<Return>", submit_qty)
         Button(checkout_win, text="Submit", command=submit_qty).pack(pady=10)
 
