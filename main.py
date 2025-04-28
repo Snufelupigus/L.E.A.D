@@ -3,12 +3,10 @@ from frontend import Frontend
 from digikey_api import Digikey_API_Call
 from ledSerial import LedController
 
-digikeyAPI = Digikey_API_Call()
+if __name__ == "__main__":
+    digikeyAPI = Digikey_API_Call()
+    ledControl  = LedController()
 
-ledControl = LedController()
+    backend = Backend(ledControl)
 
-Backend(ledControl)
-
-backend = Backend(ledControl)
-
-Frontend(backend, digikeyAPI, ledControl) 
+    Frontend(backend, digikeyAPI, ledControl)
