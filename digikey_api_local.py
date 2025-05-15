@@ -31,7 +31,7 @@ class Digikey_API_Call:
             self.CLIENT_SECRET = None
 
     def refresh_access_token(self):
-        digiKeyAuth = {'client_id': self.CLIENT_ID ,
+        digiKeyAuth = {'client_id': self.CLIENT_ID,
                'client_secret': self.CLIENT_SECRET,
                'grant_type':'client_credentials'}
         tokenRequest = requests.post("https://api.digikey.com/v1/oauth2/token", data=digiKeyAuth)
