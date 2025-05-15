@@ -77,7 +77,7 @@ class Digikey_API_Call:
             if response.text.lstrip().startswith("<!DOCTYPE html>"):
                 return None
             
-            print(json.dumps(response.json()["Products"][0], indent=2))
+            #print(json.dumps(response.json()["Products"][0], indent=2))
             
 
             result = response.json()["Products"][0]
@@ -94,7 +94,7 @@ class Digikey_API_Call:
 
             return {
                 "part_info": {
-                    "part_number": part_number,
+                    "part_number": result["ProductVariations"][0].get("DigiKeyProductNumber", "N/A"),
                     "manufacturer_number": result.get('ManufacturerProductNumber', "N/A"),
                     "location": "N/A",
                     "count": result.get('count', 0),
