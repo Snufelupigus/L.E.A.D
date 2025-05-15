@@ -13,6 +13,7 @@ class Digikey_API_Call:
 
     def load_config(self):
         """Loads API configuration from config.json"""
+        self.ACCESS_TOKEN = None
         try:
             with open(self.config_file, "r") as file:
                 config = json.load(file)
@@ -31,7 +32,7 @@ class Digikey_API_Call:
             self.CLIENT_SECRET = None
 
     def refresh_access_token(self):
-        digiKeyAuth = {'client_id': self.CLIENT_ID,
+        digiKeyAuth = {'client_id': self.CLIENT_ID ,
                'client_secret': self.CLIENT_SECRET,
                'grant_type':'client_credentials'}
         tokenRequest = requests.post("https://api.digikey.com/v1/oauth2/token", data=digiKeyAuth)
@@ -40,7 +41,7 @@ class Digikey_API_Call:
 
     def fetch_part_details(self, part_number):
         """Fetches part details from the API"""
-        if not self.CLIENT_ID or self.CLIENT_SECRET:
+        if not self.CLIENT_ID or not self.CLIENT_SECRET:
             messagebox.showerror("API Error", "Missing Digikey client ID or secret!")
             return None
         
@@ -76,13 +77,15 @@ class Digikey_API_Call:
             if response.text.lstrip().startswith("<!DOCTYPE html>"):
                 return None
             
+            print(json.dumps(response.json()["Products"][0], indent=2))
+            
 
-            result = response.json()
+            result = response.json()["Products"][0]
             if "error" in result:
                 messagebox.showerror("API Error", f"Error: {result['error']}")
                 return None
             
-            price_val = result.get('price', 0.0)
+            price_val = result.get('UnitPrice', 0.0)
             try:
                 price = float(price_val)
             except ValueError:
@@ -91,19 +94,19 @@ class Digikey_API_Call:
 
             return {
                 "part_info": {
-                    "part_number": result.get('partNumber', "N/A"),
-                    "manufacturer_number": result.get('manufacturerPartNumber', "N/A"),
-                    "location": result.get('location', "N/A"),
+                    "part_number": part_number,
+                    "manufacturer_number": result.get('ManufacturerProductNumber', "N/A"),
+                    "location": "N/A",
                     "count": result.get('count', 0),
-                    "type": result.get('type', "N/A")
+                    "type": result["Category"].get('Name', "N/A")
                 },
                 "metadata": {
                     "price": price,
                     "low_stock": "N/A",
-                    "description": result.get('description', "N/A"),
-                    "photo_url": result.get('photoUrl', "N/A"),
-                    "datasheet_url": result.get('datasheetUrl', "N/A"),
-                    "product_url": result.get('productUrl', "N/A"),
+                    "description": result["Description"].get('ProductDescription', "N/A"),
+                    "photo_url": result.get('PhotoUrl', "N/A"),
+                    "datasheet_url": result.get('DatasheetUrl', "N/A"),
+                    "product_url": result.get('ProductUrl', "N/A"),
                     "in_use": "Available"
                 }
             }
