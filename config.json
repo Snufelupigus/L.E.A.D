@@ -1,6 +1,8 @@
 {
     "API": {
-        "GOOGLE_SCRIPT_URL": "Link Here"
+        "GOOGLE_SCRIPT_URL": "Link Here",
+        "DIGIKEY_CLIENT_ID": "Client ID Here",
+        "DIGIKEY_CLIENT_SECRET": "Client Secret Here"
     },
     "SERIAL": {
         "PORT": "Your COM Port",
