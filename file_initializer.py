@@ -1,0 +1,57 @@
+import os
+import json
+from tkinter import messagebox
+
+class FileInitializer:
+    def __init__(self, database_folder="Databases"):
+        self.database_folder = os.path.join(os.path.dirname(__file__), database_folder)
+        self.catalogue_path = os.path.join(self.database_folder, "component_catalogue.json")
+        self.config_path = os.path.join(self.database_folder, "config.json")
+
+    def initialize_files(self):
+        self.ensure_folder()
+        created_config = self.ensure_config()
+        self.ensure_catalogue()
+
+        # If config was just created, prompt user
+        if created_config:
+            messagebox.showinfo("Setup Required", 
+                                f"A new config.json was created at {self.config_path}.\n\n"
+                                "Please fill in the required information before using the system.")
+            # Optionally open the config file automatically
+            os.startfile(self.config_path)
+
+    def ensure_folder(self):
+        if not os.path.exists(self.database_folder):
+            os.makedirs(self.database_folder)
+            print(f"Created folder: {self.database_folder}")
+
+    def ensure_catalogue(self):
+        if not os.path.exists(self.catalogue_path):
+            print(f"Creating new component_catalogue.json at {self.catalogue_path}")
+            with open(self.catalogue_path, "w") as f:
+                json.dump([], f, indent=4)
+
+    def ensure_config(self):
+        if not os.path.exists(self.config_path):
+            print(f"Creating new config.json at {self.config_path}")
+            default_config = {
+                "API": {
+                    "GOOGLE_SCRIPT_URL": "https://your-google-web-app-url",
+                    "DIGIKEY_CLIENT_ID": "YOUR CLIENT ID",
+                    "DIGIKEY_CLIENT_SECRET": "YOUR CLIENT SECRET"
+                },
+                "SERIAL": {
+                    "PORT": "COM3",
+                    "BAUDRATE": 9600,
+                    "TIMEOUT": 1
+                },
+                "FILES": {
+                    "COMPONENT_CATALOGUE": "Databases/component_catalogue.json",
+                    "CHANGELOG": "Databases/changelog.txt"
+                }
+            }
+            with open(self.config_path, "w") as f:
+                json.dump(default_config, f, indent=4)
+            return True  # config was created
+        return False  # config already existed

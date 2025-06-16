@@ -16,7 +16,9 @@ class Backend:
 
         script_dir = os.path.dirname(os.path.abspath(__file__))  # Get directory of backend.py
 
-        config_path = os.path.join(script_dir, "config.json")
+        database_folder = os.path.join(script_dir, "Databases")
+        config_path = os.path.join(database_folder, "config.json")
+
         config = {}
         if os.path.exists(config_path):
             try:
@@ -28,12 +30,14 @@ class Backend:
             print("Config file not found. Using default file names.")
 
         if data_file is None:
-            data_file = config.get("COMPONENT_CATALOGUE", "component_catalogue.json")
+            data_file_rel = config.get("FILES", {}).get("COMPONENT_CATALOGUE", "Databases/component_catalogue.json")
+            data_file = os.path.join(script_dir, data_file_rel) if not os.path.isabs(data_file_rel) else data_file_rel
         if changelog_file is None:
-            changelog_file = config.get("CHANGELOG", "changelog.txt")
+            changelog_file_rel = config.get("FILES", {}).get("CHANGELOG", "Databases/changelog.txt")
+            changelog_file = os.path.join(script_dir, changelog_file_rel) if not os.path.isabs(changelog_file_rel) else changelog_file_rel
 
-        self.data_file = os.path.join(script_dir, data_file)  # Set full path
-        self.changelog_file = os.path.join(script_dir, changelog_file)
+        self.data_file = data_file
+        self.changelog_file = changelog_file
 
         self.components = []
         self.load_components()

@@ -8,7 +8,7 @@ from tkinter import messagebox
 
 class Digikey_API_Call:
     def __init__(self):
-        self.config_file = os.path.join(os.path.dirname(__file__), "config.json")
+        self.config_file = os.path.join(os.path.dirname(__file__), "Databases", "config.json")
         self.load_config()
 
     def load_config(self):
@@ -76,9 +76,6 @@ class Digikey_API_Call:
 
             if response.text.lstrip().startswith("<!DOCTYPE html>"):
                 return None
-            
-            #print(json.dumps(response.json()["Products"][0], indent=2))
-            
 
             result = response.json()["Products"][0]
             if "error" in result:
@@ -91,10 +88,11 @@ class Digikey_API_Call:
             except ValueError:
                 price = 0.0  # or you could use None if that fits your logic
 
+            print(result.get("ProductVariations"))
 
             return {
                 "part_info": {
-                    "part_number": result["ProductVariations"][0].get("DigiKeyProductNumber", "N/A"),
+                    "part_number": result["ProductVariations"][0].get("DigiKeyProductNumber","N/A"),
                     "manufacturer_number": result.get('ManufacturerProductNumber', "N/A"),
                     "location": "N/A",
                     "count": result.get('count', 0),

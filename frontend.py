@@ -4,6 +4,7 @@ from tkinter.messagebox import askyesno
 from tkinter.filedialog import asksaveasfilename, askopenfilename
 
 import os
+import signal
 
 import time
 from io import BytesIO
@@ -22,6 +23,7 @@ class Frontend:
         self.root = Tk()
         self.root.title("Component Catalogue")
         self.root.geometry("1250x750")
+        self.root.state('zoomed')
 
         self.create_menu()
         self.root.focus_force()
@@ -29,10 +31,15 @@ class Frontend:
         self.root.bind("<Control-Alt-t>", self.toggle_test_mode)
         self.default_bg = self.root.cget("bg")
 
+        self.root.protocol("WM_DELETE_WINDOW", self.__exit__)
+
         # Start with the home page
         self.show_home()
 
         self.root.mainloop()
+
+    def __exit__(self):
+        os.kill(os.getpid(), signal.SIGTERM)
 
     def switch_menu(self, menu_func):
         """Helper to switch menus and record the current menu"""
@@ -653,11 +660,11 @@ class Frontend:
         def toggle_highlight():
             if not highlight_state["on"]:
                 self.ledControl.set_led_on(component["part_info"]["location"], *highlight_color)
-                highlight_button.config(text="Unhighlight")
+                highlight_button.config(text="Highlight", relief='sunken')
                 highlight_state["on"] = True
             else:
                 self.ledControl.turn_off_led(component["part_info"]["location"])
-                highlight_button.config(text="Highlight")
+                highlight_button.config(text="Highlight", relief='raised')
                 highlight_state["on"] = False
 
         highlight_button.config(command=toggle_highlight)
@@ -729,11 +736,11 @@ class Frontend:
         def toggle_highlight():
             if not highlight_state["on"]:
                 self.ledControl.set_led_on(component["part_info"]["location"], *highlight_color)
-                highlight_button.config(text="Unhighlight")
+                highlight_button.config(text="Highlight", relief='sunken')
                 highlight_state["on"] = True
             else:
                 self.ledControl.turn_off_led(component["part_info"]["location"])
-                highlight_button.config(text="Highlight")
+                highlight_button.config(text="Highlight", relief='raised')
                 highlight_state["on"] = False
 
         highlight_button = Button(edit_window, text="Highlight", command=toggle_highlight)

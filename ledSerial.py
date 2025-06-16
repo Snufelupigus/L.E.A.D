@@ -26,7 +26,7 @@ class LedController:
 
     def load_config(self):
         """Load serial config from config.json"""
-        config_path = os.path.join(os.path.dirname(__file__), "config.json")
+        config_path = os.path.join(os.path.dirname(__file__), "Databases", "config.json")
         try:
             with open(config_path, "r") as file:
                 config = json.load(file)
