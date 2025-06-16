@@ -617,7 +617,7 @@ class Frontend:
         if self.last_highlighted_location and self.last_highlighted_location != new_location:
             self.ledControl.turn_off_led(self.last_highlighted_location)
 
-        # ✅ Turn ON new LED
+        # Turn ON new LED
         self.ledControl.set_led_on(new_location, 0, 255, 0)
         self.last_highlighted_location = new_location
 

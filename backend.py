@@ -253,6 +253,7 @@ class Backend:
                     loc = comp["part_info"]["location"]
                     self.ledControl.set_led_on(loc, 0, 255, 0)
                     messagebox.showinfo("Fill Vial", f"Fill vial at {loc}.")
+                    self.ledControl.turn_off_led(loc)
 
                     # Log the change.
                     self.log_change(
