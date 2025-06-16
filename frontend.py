@@ -18,6 +18,7 @@ class Frontend:
         self.current_frame = None
         self.current_menu = None
         self.test_mode = False
+        self.last_highlighted_location = None
 
         # Initialize Tkinter window
         self.root = Tk()
@@ -602,18 +603,23 @@ class Frontend:
             Label(self.details_frame, text="No component selected", justify="left").pack(fill="both", expand=True)
             return
 
-        # Get the part number from the selected row (assumed to be the first column)
         item = tree.item(selected[0], "values")
         part_number = item[0]
 
-        # Look up the component from the backend using part_number
-        component = None
-        for comp in self.backend.get_all_components():
-            if comp["part_info"]["part_number"].strip().lower() == part_number.strip().lower():
-                component = comp
-                break
+        # Look up component
+        component = next((comp for comp in self.backend.get_all_components()
+                        if comp["part_info"]["part_number"].strip().lower() == part_number.strip().lower()), None)
         if not component:
             return
+
+        # TURN OFF previously highlighted LED
+        new_location = component["part_info"].get("location", "").strip()
+        if self.last_highlighted_location and self.last_highlighted_location != new_location:
+            self.ledControl.turn_off_led(self.last_highlighted_location)
+
+        # ✅ Turn ON new LED
+        self.ledControl.set_led_on(new_location, 0, 255, 0)
+        self.last_highlighted_location = new_location
 
         # Clear any previous details
         for widget in self.details_frame.winfo_children():
