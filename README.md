@@ -56,22 +56,7 @@ Create a DigiKey Developer Account:
 2. Create new organization and name it
 3. Next select "Create New Production App"
 4. Name you App and enable "ProductInformation V4"
-5. Save and go to view tab here you will find your Client Id and Client Secret. Save these as they are needed for the your app script
-
-## Google Web App
-The Google Apps Script acts as a bridge between your Python application and DigiKey’s API, allowing you to fetch component data.
-
-### Create and Deploy the Google Web App
-1. Go to Google [Apps Script](https://script.google.com/home)
-2. Select Creat New Project
-3. Copy the code from the [Google Web App Code](https://github.com/Snufelupigus/L.E.A.D./blob/main/Google%20Web%20App%20Code) and paste it into your app script
-4. Fill in the Blank Client ID and Client Secret sections
-![image](https://github.com/user-attachments/assets/1192769b-a223-4f01-8827-9c9283761515)
-![image](https://github.com/user-attachments/assets/cf9f7677-46c9-4e79-bc68-a46394e17f38)
-5. Select "Deploy" in the top right and click "New Deployment"
-6. Click on "Select Type" and then click "Web App"
-7. Make sure that "Execute As" is set to me, and "Who Has Access" is set to Anyone
-8. Copy the Web App link and paste it into the provided space in the config.json file
+5. Save and go to view tab here you will find your Client Id and Client Secret. Save these as they are needed for the config file
 
 # Using L.E.A.D.
 After opening the program you are left on a main menu page that lists types of components in the system. As well as any that have reached low stock. Your main navigation is throught the navigation button at the top left, the Add menu allows you to manually add components and they're data. Alternatively you can scan in a barcode. The search menu is fairly self explanitory. In the add and search menues you can double click to ecit or highlight a component.
