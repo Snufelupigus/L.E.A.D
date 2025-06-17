@@ -458,7 +458,7 @@ class Frontend:
                     barcode_window.focus_set()
 
             # Bind the Enter key to process barcode input
-            barcode_window.bind("<Return>", on_enter)
+            barcode_entry.bind("<Return>", on_enter)
 
         def bulk_add(self):
             bulk_window = Toplevel(self.root)
@@ -700,8 +700,10 @@ class Frontend:
             return
 
         edit_window = Toplevel(self.root)
-        edit_window.title("Edit Component")
-        edit_window.geometry("800x600")  # Adjust width to accommodate extra panel
+        edit_window.title("Component View")
+        edit_window.geometry("620x515") # Adjust width to accommodate extra panel
+        edit_window.resizable(width=False, height=False)
+        edit_window.attributes('-topmost', True)
 
         highlight_state = {"on": False}  # Track whether the LED is currently highlighted.
         def on_close():
@@ -712,7 +714,7 @@ class Frontend:
 
         # Left side: Part Info & Metadata fields
         fields = {}
-        Label(edit_window, text="Part Information", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=5)
+        Label(edit_window, text="Part Information", font=("Arial", 12, "bold")).grid(row=0, column=1, columnspan=1, pady=5)
 
         for i, key in enumerate(["part_number", "manufacturer_number", "location", "count", "type"]):
             Label(edit_window, text=key.replace("_", " ").title() + ":").grid(row=i+1, column=0, padx=10, pady=5, sticky="w")
@@ -733,7 +735,7 @@ class Frontend:
 
         # Right side panel: Display part image and link buttons
         right_frame = Frame(edit_window, bd=2, relief="groove")
-        right_frame.grid(row=7, column=2, columnspan=2, rowspan=4, padx=10, pady=10, sticky="n")
+        right_frame.grid(row=12, column=2, columnspan=2, rowspan=2, padx=10, sticky="n")
 
         # Datasheet and Product Page buttons
         datasheet_url = component["metadata"].get("datasheet_url", "")
@@ -796,7 +798,7 @@ class Frontend:
                 updated_data["part_info"]["type"]
             ))
 
-        Button(edit_window, text="Save Changes", command=save_changes).grid(row=6, column=2, columnspan=2, pady=10)
+        Button(edit_window, text="Save Changes", command=save_changes).grid(row=6, column=1, columnspan=2, pady=10)
         edit_window.bind("<Return>", lambda event: save_changes())
 
     def delete_component(self, tree):
