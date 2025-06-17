@@ -683,14 +683,21 @@ class Frontend:
             messagebox.showerror("Error", "No component selected!")
             return
 
-        index = int(tree.index(selected_item))
-
         item = tree.item(selected_item[0], "values")
-        part_number = item[0]  # Assuming the first column is the part_number
+        part_number = item[0].strip().lower()
 
-        # Search for the component in the backend using part_number
-        component = next((comp for comp in self.backend.get_all_components() 
-                        if comp["part_info"]["part_number"].strip().lower() == part_number.strip().lower()), None)
+        # Find the actual component and its index in backend.components
+        component = None
+        index = -1
+        for i, comp in enumerate(self.backend.get_all_components()):
+            if comp["part_info"]["part_number"].strip().lower() == part_number:
+                component = comp
+                index = i
+                break
+
+        if component is None:
+            messagebox.showerror("Error", "Component not found in backend.")
+            return
 
         edit_window = Toplevel(self.root)
         edit_window.title("Edit Component")
@@ -795,18 +802,27 @@ class Frontend:
     def delete_component(self, tree):
         selected_item = tree.selection()
         if not selected_item:
-            messagebox.showerror("Error", "No component selected!")
             return
-        
-        if not askyesno("Confirm Component Deletion", "Are you sure you want to delete component?"):
-            return
-        
-        index = int(tree.index(selected_item))
-        self.backend.delete_component(index)
-        messagebox.showinfo("Success", "Component deleted successfully!")
 
-        # Remove the selected row from TreeView
-        tree.delete(selected_item)
+        item = tree.item(selected_item[0], "values")
+        part_number = item[0].strip().lower()
+
+        # Find index of component in backend
+        index = -1
+        for i, comp in enumerate(self.backend.get_all_components()):
+            if comp["part_info"]["part_number"].strip().lower() == part_number:
+                index = i
+                break
+
+        if index == -1:
+            messagebox.showerror("Error", "Component not found in backend.")
+            return
+
+        confirm = messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete part: {part_number}?")
+        if confirm:
+            self.backend.delete_component(index)
+            self.backend.save_components()
+            tree.delete(selected_item)
 
     def export_low_stock_data(self):
         # Open a Save As dialog to get the file path
