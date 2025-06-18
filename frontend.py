@@ -437,9 +437,7 @@ class Frontend:
 
                 extraInfo.focus_set()
 
-                extraInfo.bind("<Return>", on_enter)
-
-                def low_stock_entry_handeling():
+                def low_stock_entry_handeling(event):
                     low_stock = int(low_stock_var.get())
                     extraInfo.destroy()  # Close the window
                     if barcode:
@@ -448,6 +446,7 @@ class Frontend:
                         fetch_digikey_data(self, barcode_data)
                 
                 Button(extraInfo, text="Save", command= low_stock_entry_handeling).pack(pady= 5)
+                extraInfo.bind("<Return>", low_stock_entry_handeling)
                 return True
 
             def on_enter(event):
