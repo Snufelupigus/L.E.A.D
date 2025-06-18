@@ -35,7 +35,7 @@ Bulk operations allow for scanning and adding multiple parts at once.
 This guide will walk you through downloading the code from GitHub, setting up a Google Apps Script for API communication, getting a DigiKey API key, and configuring the config file to link everything together.
 
 ## Downloading and Running Program
-This is a basic overview on downloading and running the program. This is for begginers feel free to ignore.
+This is a basic overview on downloading and running the program. This is for beginners feel free to ignore.
 
 ### Dowloading From GitHub
 1. Click on the Code button near the top right of the page
