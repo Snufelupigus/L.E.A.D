@@ -4,3 +4,8 @@
     - [ ] Sub Task 2
     - [ ] Sub Task 3
     - [ ] Sub Task 4
+- [ ] Bug Fixes
+    - [ ] barcode low stock entry enter not working
+    - [ ] Bulk entry
+        - [ ] Things dont light up
+        - [ ] 
