@@ -1,2 +1,3 @@
 /Databases/
 /backups/
+*.pyc
