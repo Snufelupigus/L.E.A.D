@@ -7,6 +7,7 @@ from tkinter import messagebox
 
 
 class Digikey_API_Call:
+    ACCESS_TOKEN: str
     def __init__(self):
         self.config_file = os.path.join(os.path.dirname(__file__), "Databases", "config.json")
         self.load_config()
@@ -38,6 +39,70 @@ class Digikey_API_Call:
         tokenRequest = requests.post("https://api.digikey.com/v1/oauth2/token", data=digiKeyAuth)
         self.ACCESS_TOKEN = tokenRequest.json()["access_token"]
         self.TOKEN_EXPIRES = time.time() + tokenRequest.json()["expires_in"]
+
+    def fetch_media(self, part_number):
+        """Uses Digikey API to fetch media"""
+        if not self.CLIENT_ID or not self.CLIENT_SECRET:
+            messagebox.showerror("API Error", "Missing Digikey client ID or secret!")
+            return None
+        
+        # checking tokens are ok 
+        if not self.ACCESS_TOKEN or time.time() > self.TOKEN_EXPIRES:
+            self.refresh_access_token()
+
+        mediaHeaders = {
+            'Authorization': 'Bearer ' + self.ACCESS_TOKEN,
+            'X-DIGIKEY-Client-Id': self.CLIENT_ID,
+            'X-DIGIKEY-Locale-Site': 'US',
+            'X-DIGIKEY-Locale-Language': 'en', 
+            'X-DIGIKEY-Locale-Currency': 'USD',
+            'Accept': 'application/json'
+        }
+
+        mediaParams = {
+            'partNumber': part_number.strip(),
+            'recordCount': 10,
+            'mediaType': 'Image'
+        }
+
+        try:
+            response = requests.get(url='https://api.digikey.com/products/v4/productsearch/media', headers=mediaHeaders, data=mediaParams)
+            response.raise_for_status()
+            print (json.dumps(response.json(), indent=2))
+
+        except requests.exceptions.HTTPError as http_error:
+            status_code = http_error.response.status_code
+
+            if status_code == 400:
+                messagebox.showerror("Bad Request", "Input model is invalid or malformed.")
+            elif status_code == 401:
+                messagebox.showerror("Unauthorized", "Access token is missing, expired, or invalid.")
+            elif status_code == 403:
+                messagebox.showerror("Forbidden", "Access is denied. Check Client ID and subscription settings.")
+            elif status_code == 404:
+                messagebox.showerror("Not Found", "The requested resource or part number was not found.")
+            elif status_code == 405:
+                messagebox.showerror("Method Not Allowed", "The HTTP method used is not supported by this endpoint.")
+            elif status_code == 408:
+                messagebox.showerror("Request Timeout", "The request timed out. Please try again.")
+            elif status_code == 429:
+                messagebox.showerror("Rate Limit Exceeded", "Too many requests. Please slow down.")
+            elif status_code == 500:
+                messagebox.showerror("Server Error", "An internal server error occurred. Try again later.")
+            elif status_code == 502:
+                messagebox.showerror("Bad Gateway", "Digi-Key's server received an invalid response from upstream.")
+            elif status_code == 503:
+                messagebox.showerror("Service Unavailable", "The service is temporarily unavailable. Try again later.")
+            elif status_code == 504:
+                messagebox.showerror("Gateway Timeout", "The server did not receive a timely response.")
+            else:
+                messagebox.showerror("HTTP Error", f"Unexpected error {status_code}: {http_error.response.text}")
+
+        except requests.exceptions.RequestException as req_error:
+            messagebox.showerror("Connection Error", f"A network error happened: \n{str(req_error)}")
+
+
+
 
     def fetch_part_details(self, part_number):
         """Fetches part details from the API"""
