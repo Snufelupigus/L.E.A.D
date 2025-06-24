@@ -1,3 +1,6 @@
 /Databases/
 /backups/
 *.pyc
+/.vscode/
+config.json
+changelog.txt
