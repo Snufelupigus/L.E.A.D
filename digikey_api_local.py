@@ -33,20 +33,60 @@ class Digikey_API_Call:
             self.CLIENT_SECRET = None
 
     def refresh_access_token(self):
-        digiKeyAuth = {'client_id': self.CLIENT_ID ,
-               'client_secret': self.CLIENT_SECRET,
-               'grant_type':'client_credentials'}
-        tokenRequest = requests.post("https://api.digikey.com/v1/oauth2/token", data=digiKeyAuth)
-        self.ACCESS_TOKEN = tokenRequest.json()["access_token"]
-        self.TOKEN_EXPIRES = time.time() + tokenRequest.json()["expires_in"]
 
-    def fetch_media(self, part_number):
-        """Uses Digikey API to fetch media"""
+        #Check if we have a client id and secret.
         if not self.CLIENT_ID or not self.CLIENT_SECRET:
             messagebox.showerror("API Error", "Missing Digikey client ID or secret!")
             return None
         
-        # checking tokens are ok 
+
+        digiKeyAuth = {'client_id': self.CLIENT_ID ,
+               'client_secret': self.CLIENT_SECRET,
+               'grant_type':'client_credentials'}
+        
+        try:
+            tokenRequest = requests.post("https://api.digikey.com/v1/oauth2/token", data=digiKeyAuth)
+            tokenRequest.raise_for_status()
+        except requests.exceptions.HTTPError as http_error:
+            #Should return as a 401 error, I think it's safe to assume that the credentials are invalid.
+            messagebox.showerror("Bad Credentials", "Credentials entered in config.json are not vaild.")
+            return None
+
+
+        self.ACCESS_TOKEN = tokenRequest.json()["access_token"]
+        self.TOKEN_EXPIRES = time.time() + tokenRequest.json()["expires_in"]
+
+    def _handle_digikey_error(self, http_error):
+        match http_error.response.status_code:
+            case 400:
+                messagebox.showerror("Bad Request", "Input model is invalid or malformed.")
+            case 401:
+                messagebox.showerror("Unauthorized", "Access token is missing, expired, or invalid.")
+            case 403:
+                messagebox.showerror("Forbidden", "Access is denied. Check Client ID and subscription settings. This may also be an error with Digikeys servers.")
+            case 404:
+                messagebox.showerror("Not Found", "The requested resource or part number was not found.")
+            case 405:
+                messagebox.showerror("Method Not Allowed", "The HTTP method used is not supported by this endpoint.")
+            case 408:
+                messagebox.showerror("Request Timeout", "The request timed out. Please try again.")
+            case 429:
+                messagebox.showerror("Rate Limit Exceeded", "Too many requests. Please slow down.")
+            case 500:
+                messagebox.showerror("Server Error", "An internal server error occurred. Try again later.")
+            case 502:
+                messagebox.showerror("Bad Gateway", "Digi-Key's server received an invalid response from upstream.")
+            case 503:
+                messagebox.showerror("Service Unavailable", "The service is temporarily unavailable. Try again later.")
+            case 504:
+                messagebox.showerror("Gateway Timeout", "The server did not receive a timely response.")
+            case _:
+                messagebox.showerror("HTTP Error", f"Unexpected error {http_error.response.status_code}: {http_error.response.text}")
+
+    def fetch_media(self, part_number):
+        """Uses Digikey API to fetch media"""
+        
+        # Check that we have a token and that it is not expired.
         if not self.ACCESS_TOKEN or time.time() > self.TOKEN_EXPIRES:
             self.refresh_access_token()
 
@@ -71,32 +111,9 @@ class Digikey_API_Call:
             print (json.dumps(response.json(), indent=2))
 
         except requests.exceptions.HTTPError as http_error:
-            status_code = http_error.response.status_code
+            self._handle_digikey_error(http_error)
 
-            if status_code == 400:
-                messagebox.showerror("Bad Request", "Input model is invalid or malformed.")
-            elif status_code == 401:
-                messagebox.showerror("Unauthorized", "Access token is missing, expired, or invalid.")
-            elif status_code == 403:
-                messagebox.showerror("Forbidden", "Access is denied. Check Client ID and subscription settings.")
-            elif status_code == 404:
-                messagebox.showerror("Not Found", "The requested resource or part number was not found.")
-            elif status_code == 405:
-                messagebox.showerror("Method Not Allowed", "The HTTP method used is not supported by this endpoint.")
-            elif status_code == 408:
-                messagebox.showerror("Request Timeout", "The request timed out. Please try again.")
-            elif status_code == 429:
-                messagebox.showerror("Rate Limit Exceeded", "Too many requests. Please slow down.")
-            elif status_code == 500:
-                messagebox.showerror("Server Error", "An internal server error occurred. Try again later.")
-            elif status_code == 502:
-                messagebox.showerror("Bad Gateway", "Digi-Key's server received an invalid response from upstream.")
-            elif status_code == 503:
-                messagebox.showerror("Service Unavailable", "The service is temporarily unavailable. Try again later.")
-            elif status_code == 504:
-                messagebox.showerror("Gateway Timeout", "The server did not receive a timely response.")
-            else:
-                messagebox.showerror("HTTP Error", f"Unexpected error {status_code}: {http_error.response.text}")
+            
 
         except requests.exceptions.RequestException as req_error:
             messagebox.showerror("Connection Error", f"A network error happened: \n{str(req_error)}")
@@ -106,16 +123,9 @@ class Digikey_API_Call:
 
     def fetch_part_details(self, part_number):
         """Fetches part details from the API"""
-        if not self.CLIENT_ID or not self.CLIENT_SECRET:
-            messagebox.showerror("API Error", "Missing Digikey client ID or secret!")
-            return None
         
-        #Check that we have a token
-        if not self.ACCESS_TOKEN:
-            self.refresh_access_token()
-
-        #Check if the token has expired
-        if time.time() > self.TOKEN_EXPIRES:
+        # Check that we have a token and that it is not expired.
+        if not self.ACCESS_TOKEN or time.time() > self.TOKEN_EXPIRES:
             self.refresh_access_token()
         
 
@@ -173,7 +183,9 @@ class Digikey_API_Call:
                     "in_use": "Available"
                 }
             }
-        except requests.exceptions.RequestException as e:
-            messagebox.showerror("API Request Failed", f"Error contacting API:\n{e}")
-            return None
+        except requests.exceptions.HTTPError as http_error:
+            self._handle_digikey_error(http_error)
+
+        except requests.exceptions.RequestException as req_error:
+            messagebox.showerror("Connection Error", f"A network error happened: \n{str(req_error)}")
 
