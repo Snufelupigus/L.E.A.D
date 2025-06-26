@@ -1,3 +1,5 @@
+from PIL import Image
+from io import BytesIO
 import requests
 import logging
 logging.basicConfig(level=logging.DEBUG)
@@ -84,54 +86,22 @@ class Digikey_API_Call:
             case _:
                 messagebox.showerror("HTTP Error", f"Unexpected error {http_error.response.status_code}: {http_error.response.text}")
 
-    def fetch_media(self, part_number):
-        """Uses Digikey API to fetch media"""
-        logging.debug("Reached fetch_media.")
-        # Check that we have a token and that it is not expired.
-        if not self.ACCESS_TOKEN or time.time() > self.TOKEN_EXPIRES:
-            self.refresh_access_token()
-
-        mediaHeaders = {
-            'Authorization': 'Bearer ' + self.ACCESS_TOKEN,
-            'X-DIGIKEY-Client-Id': self.CLIENT_ID,
-            'X-DIGIKEY-Locale-Site': 'US',
-            'X-DIGIKEY-Locale-Language': 'en', 
-            'X-DIGIKEY-Locale-Currency': 'USD',
-            #'X-DIGIKEY-Customer-Id': '0', <-- culprit
-            'Accept': 'application/json'
+    def fetch_image_data(self, photo_url):
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
         }
-        logging.debug("Assigning Headers")
-
-        # omit the mediaType to recieve all available media
-        # TODO:tariq currently always getting a 404 return, which suggests some part of the header is wrong
-        # my guess is that customer-id needs to be stored and properly used.
-        mediaParams = {
-            'partNumber': part_number.strip(),
-        }
-        logging.debug("Assigning Params")
-
-        try:
-            logging.debug("Requesting media model from digikey.")
-            response = requests.get(url='https://api.digikey.com/products/v4/productsearch/media', 
-                                    headers=mediaHeaders, 
-                                    params=mediaParams)
-            response.raise_for_status()
-            logging.debug("Recieved the media model from digikey.\n %s", json.dumps(response.json(), indent=2))
-
-        except requests.exceptions.HTTPError as http_error:
-            self._handle_digikey_error(http_error)
-
-            
-
-        except requests.exceptions.RequestException as req_error:
-            messagebox.showerror("Connection Error", f"A network error happened: \n{str(req_error)}")
-
+        response = requests.get(photo_url, headers=headers)
+        if not response.ok:
+            messagebox.showerror("GET ERROR", "Status: {0}, Body: {1}".format(response.status_code, response.text))
+            return None
+        Image.open(BytesIO(response.content)).show()
+        return response.content
 
 
 
     def fetch_part_details(self, part_number):
         """Fetches part details from the API"""
-        
         # Check that we have a token and that it is not expired.
         if not self.ACCESS_TOKEN or time.time() > self.TOKEN_EXPIRES:
             self.refresh_access_token()
@@ -152,19 +122,31 @@ class Digikey_API_Call:
             'Offset': 0,
             'FilterOptionsRequest': {} # Optional filters
         }
+
         try:
             logging.debug("Requesting the data model from digikey.")
             response = requests.post('https://api.digikey.com/products/v4/search/keyword', data=json.dumps(searchParams), headers=searchHeaders)
             
             response.raise_for_status()  # Raise error for HTTP issues
 
-            if response.text.lstrip().startswith("<!DOCTYPE html>"):
-                return None
+            # shouldn't need to check this as if error will be caught in exception
+            # if response.text.lstrip().startswith("<!DOCTYPE html>"):
+            #     return None
 
             result = response.json()["Products"][0]
+
+            # would be an internal request error, our api call went through.
+            # the body is incorrect however so we check
             if "error" in result:
                 messagebox.showerror("API Error", f"Error: {result['error']}")
                 return None
+
+            photo_url = result.get('PhotoUrl')
+            if photo_url == None:
+                messagebox.showerror("No Photo Found", "Could not find image for part: {}".format(part_number.strip()))
+            else:
+                messagebox.showinfo("Success", "Component Photo Found")
+                image_blob = self.fetch_image_data(photo_url)
             
             price_val = result.get('UnitPrice', 0.0)
             try:

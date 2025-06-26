@@ -292,7 +292,7 @@ class Frontend:
                 messagebox.showerror("Error", "Low Stock Threshold must be a number!")
                 return
             
-            if self.backend.check_duplicate(component_data)== False: 
+            if self.backend.check_duplicate(component_data) == False: 
                 self.ledControl.turn_off_recent()
                 update_add_tree()
                 for key, (_, widget) in fields.items():
