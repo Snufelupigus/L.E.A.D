@@ -14,5 +14,4 @@ if __name__ == "__main__":
 
     backend = Backend(ledControl)
 
-#    Frontend(backend, digikeyAPI, ledControl)
-    digikeyAPI.fetch_media('311-1.00CRCT-ND')
+    Frontend(backend, digikeyAPI, ledControl)
