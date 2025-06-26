@@ -8,8 +8,8 @@
         - [ ] Things dont light up
 
 ## request_media
-- [ ] set up prebuild binary as venv source for my local development
-- [ ] format headers and param correctly
+- [x] set up prebuild binary as venv source for my local development
+- [x] format headers and param correctly
 - [ ] extract the model from digikey
 - [ ] dl the image from the supplied link
 - [ ] create a database and cash the image blob
