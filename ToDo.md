@@ -10,7 +10,7 @@
 ## request_media
 - [x] set up prebuild binary as venv source for my local development
 - [x] format headers and param correctly
-- [x] extract the model from digikey
-- [x] dl the image from the supplied link
+- [ ] extract the model from digikey
+- [ ] dl the image from the supplied link
 - [ ] create a database and cash the image blob
 - [ ] develop logic for 
