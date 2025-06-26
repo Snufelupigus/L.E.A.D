@@ -89,7 +89,7 @@ class Digikey_API_Call:
             case _:
                 messagebox.showerror("HTTP Error", f"Unexpected error {http_error.response.status_code}: {http_error.response.text}")
 
-    def fetch_image_data(self, photo_url):
+    def fetch_image_data(self, photo_url: str, part_number: str):
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
@@ -108,7 +108,7 @@ class Digikey_API_Call:
 
 
 
-    def fetch_part_details(self, part_number):
+    def fetch_part_details(self, part_number: str):
         """Fetches part details from the API"""
         # Check that we have a token and that it is not expired.
         if not self.ACCESS_TOKEN or time.time() > self.TOKEN_EXPIRES:
@@ -157,7 +157,7 @@ class Digikey_API_Call:
                 messagebox.showinfo("Success", "Component Photo Found")
                 # now create and populate an entry object to use against database
                 #TODO: tariq, implement logic to check if already in database before requesting image again
-                image_entry = self.fetch_image_data(photo_url)
+                image_entry = self.fetch_image_data(photo_url, part_number.strip())
             
             price_val = result.get('UnitPrice', 0.0)
             try:
