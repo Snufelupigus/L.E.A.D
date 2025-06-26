@@ -1,4 +1,6 @@
 import requests
+import logging
+logging.basicConfig(level=logging.DEBUG)
 import json
 import os
 import time
@@ -33,7 +35,6 @@ class Digikey_API_Call:
             self.CLIENT_SECRET = None
 
     def refresh_access_token(self):
-
         #Check if we have a client id and secret.
         if not self.CLIENT_ID or not self.CLIENT_SECRET:
             messagebox.showerror("API Error", "Missing Digikey client ID or secret!")
@@ -85,7 +86,7 @@ class Digikey_API_Call:
 
     def fetch_media(self, part_number):
         """Uses Digikey API to fetch media"""
-        
+        logging.debug("Reached fetch_media.")
         # Check that we have a token and that it is not expired.
         if not self.ACCESS_TOKEN or time.time() > self.TOKEN_EXPIRES:
             self.refresh_access_token()
@@ -96,19 +97,26 @@ class Digikey_API_Call:
             'X-DIGIKEY-Locale-Site': 'US',
             'X-DIGIKEY-Locale-Language': 'en', 
             'X-DIGIKEY-Locale-Currency': 'USD',
+            #'X-DIGIKEY-Customer-Id': '0', <-- culprit
             'Accept': 'application/json'
         }
+        logging.debug("Assigning Headers")
 
+        # omit the mediaType to recieve all available media
+        # TODO:tariq currently always getting a 404 return, which suggests some part of the header is wrong
+        # my guess is that customer-id needs to be stored and properly used.
         mediaParams = {
             'partNumber': part_number.strip(),
-            'recordCount': 10,
-            'mediaType': 'Image'
         }
+        logging.debug("Assigning Params")
 
         try:
-            response = requests.get(url='https://api.digikey.com/products/v4/productsearch/media', headers=mediaHeaders, data=mediaParams)
+            logging.debug("Requesting media model from digikey.")
+            response = requests.get(url='https://api.digikey.com/products/v4/productsearch/media', 
+                                    headers=mediaHeaders, 
+                                    params=mediaParams)
             response.raise_for_status()
-            print (json.dumps(response.json(), indent=2))
+            logging.debug("Recieved the media model from digikey.\n %s", json.dumps(response.json(), indent=2))
 
         except requests.exceptions.HTTPError as http_error:
             self._handle_digikey_error(http_error)
@@ -145,6 +153,7 @@ class Digikey_API_Call:
             'FilterOptionsRequest': {} # Optional filters
         }
         try:
+            logging.debug("Requesting the data model from digikey.")
             response = requests.post('https://api.digikey.com/products/v4/search/keyword', data=json.dumps(searchParams), headers=searchHeaders)
             
             response.raise_for_status()  # Raise error for HTTP issues
