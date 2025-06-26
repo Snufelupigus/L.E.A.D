@@ -1,3 +1,6 @@
+from image_cache import ImageCacheEntry
+from image_cache import Image_Cache
+from datetime import datetime
 from PIL import Image
 from io import BytesIO
 import requests
@@ -95,8 +98,13 @@ class Digikey_API_Call:
         if not response.ok:
             messagebox.showerror("GET ERROR", "Status: {0}, Body: {1}".format(response.status_code, response.text))
             return None
-        Image.open(BytesIO(response.content)).show()
-        return response.content
+        #Image.open(BytesIO(response.content)).show()
+        return ImageCacheEntry(
+            part_number=response.headers.get('DigiKeyProductNumber'),
+            image=response.content,
+            etag=response.headers.get('ETag'),
+            fetched_at=datetime.now()
+        )
 
 
 
@@ -141,12 +149,15 @@ class Digikey_API_Call:
                 messagebox.showerror("API Error", f"Error: {result['error']}")
                 return None
 
+            # extract photo url
             photo_url = result.get('PhotoUrl')
             if photo_url == None:
                 messagebox.showerror("No Photo Found", "Could not find image for part: {}".format(part_number.strip()))
             else:
                 messagebox.showinfo("Success", "Component Photo Found")
-                image_blob = self.fetch_image_data(photo_url)
+                # now create and populate an entry object to use against database
+                #TODO: tariq, implement logic to check if already in database before requesting image again
+                image_entry = self.fetch_image_data(photo_url)
             
             price_val = result.get('UnitPrice', 0.0)
             try:
