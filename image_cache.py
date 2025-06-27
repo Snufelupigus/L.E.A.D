@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -8,7 +9,7 @@ class ImageCacheEntry:
     dk_part_number: str | None
     image: bytes | None
     etag: str | None
-    fetched_at: datetime | None
+    fetched_at: str | None
 
 class Image_Cache:
     def __init__(self):
@@ -37,14 +38,20 @@ class Image_Cache:
         except Exception:
             pass # avoid crash
 
-
     def print_entry(self, part_number: str | None):
         cursor = self.conn.cursor()
         cursor.execute("""
             SELECT part_number, image, etag, fetched_at 
-            FROM image_cache WHERE part_number = ?
+            FROM image_cache 
+            WHERE part_number = ?
             """, (part_number,)) # single comma to make it a tuple
         entry = cursor.fetchone()
+        if not entry:
+            logging.debug("Entry not found, can't print.")
+            return None
+        logging.debug("Entry:\nPart Number: {0}\nETag: {1}\nFetched at: {2}", 
+                       entry.dk_part_number, entry.etag, entry.fetched_at)
+        return None
 
     def already_exists(self, part_number: str | None):
         cursor = self.conn.cursor()
@@ -75,7 +82,7 @@ class Image_Cache:
                 dk_part_number=row[0],
                 image=row[1],
                 etag=row[2],
-                fetched_at=datetime.fromisoformat(row[3])
+                fetched_at=row[3] # since already stored in the %Y-%m-%d %H:%M:%S
             )
         return None
 
