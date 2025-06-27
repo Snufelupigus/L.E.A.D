@@ -210,6 +210,7 @@ class Backend:
         }
         return parsed_data
 
+    # TODO:tariq maybe seperate the check from the actual updating the part
     def check_duplicate(self, component):
         """
         Checks if the component is a duplicate of an existing one using fuzzy matching.
