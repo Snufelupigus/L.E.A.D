@@ -17,6 +17,7 @@ class Digikey_API_Call:
     ACCESS_TOKEN: str
     def __init__(self):
         self.config_file = os.path.join(os.path.dirname(__file__), "Databases", "config.json")
+        self.image_cache = Image_Cache()
         self.load_config()
 
     def load_config(self):
@@ -90,21 +91,32 @@ class Digikey_API_Call:
                 messagebox.showerror("HTTP Error", f"Unexpected error {http_error.response.status_code}: {http_error.response.text}")
 
     def fetch_image_data(self, photo_url: str, part_number: str):
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
-        }
+        cache_entry = self.image_cache.request_entry(dk_part_number=part_number.strip())
+        if cache_entry:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+                "If-None-Match": cache_entry.etag
+            }
+        else:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+            }
+
         response = requests.get(photo_url, headers=headers)
-        if not response.ok:
-            messagebox.showerror("GET ERROR", "Status: {0}, Body: {1}".format(response.status_code, response.text))
-            return None
-        #Image.open(BytesIO(response.content)).show()
-        return ImageCacheEntry(
-            part_number=response.headers.get('DigiKeyProductNumber'),
-            image=response.content,
-            etag=response.headers.get('ETag'),
-            fetched_at=datetime.now()
-        )
+        if response.status_code == 304: # the etag matches so just return the cached entry
+            return cache_entry
+        elif response.status_code == 200: # doesnt match so create new entry and return it
+            return ImageCacheEntry(
+                dk_part_number=response.headers.get('DigiKeyProductNumber'),
+                image=response.content,
+                etag=response.headers.get('ETag'),
+                fetched_at=datetime.now()
+            )
+        else:
+            if cache_entry:
+                
 
 
 
