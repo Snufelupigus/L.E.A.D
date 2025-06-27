@@ -1,5 +1,4 @@
-from image_cache import ImageCacheEntry
-from image_cache import Image_Cache
+from image_cache import ImageCacheEntry, Image_Cache
 from datetime import datetime, timezone
 from PIL import Image
 from io import BytesIO
@@ -47,9 +46,11 @@ class Digikey_API_Call:
             return None
         
 
-        digiKeyAuth = {'client_id': self.CLIENT_ID ,
-               'client_secret': self.CLIENT_SECRET,
-               'grant_type':'client_credentials'}
+        digiKeyAuth = {
+            'client_id': self.CLIENT_ID ,
+            'client_secret': self.CLIENT_SECRET,
+            'grant_type':'client_credentials'
+        }
         
         try:
             tokenRequest = requests.post("https://api.digikey.com/v1/oauth2/token", data=digiKeyAuth)
@@ -63,7 +64,8 @@ class Digikey_API_Call:
         self.ACCESS_TOKEN = tokenRequest.json()["access_token"]
         self.TOKEN_EXPIRES = time.time() + tokenRequest.json()["expires_in"]
 
-    def _handle_digikey_error(self, http_error):
+    @staticmethod
+    def _handle_digikey_error(http_error):
         match http_error.response.status_code:
             case 400:
                 messagebox.showerror("Bad Request", "Input model is invalid or malformed.")
@@ -90,6 +92,11 @@ class Digikey_API_Call:
             case _:
                 messagebox.showerror("HTTP Error", f"Unexpected error {http_error.response.status_code}: {http_error.response.text}")
 
+    @staticmethod
+    def _show_error_and_return_none(msg: str, code: int):
+        messagebox.showerror("Failed to Fetch Image", f"{msg}.\nHTTP ERROR: {code}")
+        return None
+
     def fetch_image_data(self, photo_url: str, part_number: str):
         cache_entry = self.image_cache.request_entry(dk_part_number=part_number.strip())
         if cache_entry:
@@ -104,27 +111,26 @@ class Digikey_API_Call:
                     "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
             }
 
-        response = requests.get(photo_url, headers=headers)
+        response = requests.get(photo_url, headers=headers, timeout=5)
         if response.status_code == 304: # the etag matches so just return the cached entry
             return cache_entry
-        # TODO:tariq handle if already in db and need to update the entry
         elif response.status_code == 200: 
             if cache_entry: # entry exists but not same etag so update and return
                 cache_entry.image = response.content
                 cache_entry.etag = response.headers.get('ETag')
-                cache_entry.fetched_at = datetime.now(timezone.utc).isoformat()
+                cache_entry.fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                return cache_entry
             else: # doesnt exist so build entry object and return
                 return ImageCacheEntry(
                     dk_part_number=response.headers.get('DigiKeyProductNumber'),
                     image=response.content,
                     etag=response.headers.get('ETag'),
-                    fetched_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%s")
+                    fetched_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                 )
         # TODO:tariq handle httperror while requesting
         else:
-            if cache_entry:
-                
-
+            return cache_entry if cache_entry else self._show_error_and_return_none("Failed to load image.", 
+                                                                                    response.status_code)
 
 
     def fetch_part_details(self, part_number: str):
@@ -152,7 +158,10 @@ class Digikey_API_Call:
 
         try:
             logging.debug("Requesting the data model from digikey.")
-            response = requests.post('https://api.digikey.com/products/v4/search/keyword', data=json.dumps(searchParams), headers=searchHeaders)
+            response = requests.post('https://api.digikey.com/products/v4/search/keyword', 
+                                     data=json.dumps(searchParams), 
+                                     headers=searchHeaders, 
+                                     timeout=5)
             
             response.raise_for_status()  # Raise error for HTTP issues
 
@@ -170,14 +179,6 @@ class Digikey_API_Call:
                 messagebox.showerror("API Error", f"Error: {result['error']}")
                 return None
 
-            # TODO:tariq see below
-            photo_url = result.get('PhotoUrl')
-            if not photo_url:
-                messagebox.showerror("No Photo Found", "Could not find image for part: {}".format(part_number.strip()))
-            else:
-                messagebox.showinfo("Success", "Component Photo Found")
-                image_entry = self.fetch_image_data(photo_url, part_number.strip())
-            
             price_val = result.get('UnitPrice', 0.0)
             try:
                 price = float(price_val)
@@ -186,8 +187,6 @@ class Digikey_API_Call:
 
             print(result.get("ProductVariations"))
 
-            # TODO:tariq since we are storing the photourl already
-            # consider interacting with the returned part details to fetch the image instead of inside this func
             return {
                 "part_info": {
                     "part_number": result["ProductVariations"][0].get("DigiKeyProductNumber","N/A"),
