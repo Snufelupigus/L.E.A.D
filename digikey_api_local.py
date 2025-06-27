@@ -1,6 +1,6 @@
 from image_cache import ImageCacheEntry
 from image_cache import Image_Cache
-from datetime import datetime
+from datetime import datetime, timezone
 from PIL import Image
 from io import BytesIO
 import requests
@@ -107,13 +107,20 @@ class Digikey_API_Call:
         response = requests.get(photo_url, headers=headers)
         if response.status_code == 304: # the etag matches so just return the cached entry
             return cache_entry
-        elif response.status_code == 200: # doesnt match so create new entry and return it
-            return ImageCacheEntry(
-                dk_part_number=response.headers.get('DigiKeyProductNumber'),
-                image=response.content,
-                etag=response.headers.get('ETag'),
-                fetched_at=datetime.now()
-            )
+        # TODO:tariq handle if already in db and need to update the entry
+        elif response.status_code == 200: 
+            if cache_entry: # entry exists but not same etag so update and return
+                cache_entry.image = response.content
+                cache_entry.etag = response.headers.get('ETag')
+                cache_entry.fetched_at = datetime.now(timezone.utc).isoformat()
+            else: # doesnt exist so build entry object and return
+                return ImageCacheEntry(
+                    dk_part_number=response.headers.get('DigiKeyProductNumber'),
+                    image=response.content,
+                    etag=response.headers.get('ETag'),
+                    fetched_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%s")
+                )
+        # TODO:tariq handle httperror while requesting
         else:
             if cache_entry:
                 
@@ -149,26 +156,26 @@ class Digikey_API_Call:
             
             response.raise_for_status()  # Raise error for HTTP issues
 
-            # shouldn't need to check this as if error will be caught in exception
+            # shouldn't need to check this because if response is error, then 
+            # status code would reflect that and be caught by the exception
             # if response.text.lstrip().startswith("<!DOCTYPE html>"):
             #     return None
 
             result = response.json()["Products"][0]
 
-            # would be an internal request error, our api call went through.
-            # the body is incorrect however so we check
+            # this would happen if there is some error on DIGIKEY side,
+            # they accepted our token and they're returning a success code
+            # but the body could be incorrect so we check
             if "error" in result:
                 messagebox.showerror("API Error", f"Error: {result['error']}")
                 return None
 
-            # extract photo url
+            # TODO:tariq see below
             photo_url = result.get('PhotoUrl')
-            if photo_url == None:
+            if not photo_url:
                 messagebox.showerror("No Photo Found", "Could not find image for part: {}".format(part_number.strip()))
             else:
                 messagebox.showinfo("Success", "Component Photo Found")
-                # now create and populate an entry object to use against database
-                #TODO: tariq, implement logic to check if already in database before requesting image again
                 image_entry = self.fetch_image_data(photo_url, part_number.strip())
             
             price_val = result.get('UnitPrice', 0.0)
@@ -179,6 +186,8 @@ class Digikey_API_Call:
 
             print(result.get("ProductVariations"))
 
+            # TODO:tariq since we are storing the photourl already
+            # consider interacting with the returned part details to fetch the image instead of inside this func
             return {
                 "part_info": {
                     "part_number": result["ProductVariations"][0].get("DigiKeyProductNumber","N/A"),
