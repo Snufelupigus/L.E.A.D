@@ -237,6 +237,7 @@ class Backend:
         return parsed_data
     
 
+    # TODO:tariq maybe seperate the check from the actual updating the part
     def check_duplicate(self, component):
         new_raw = component["part_number"].strip().lower()
         new_part_number = self.normalize_part_number(new_raw)

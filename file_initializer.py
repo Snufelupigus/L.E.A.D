@@ -1,5 +1,6 @@
 import os
 import json
+import sqlite3
 from tkinter import messagebox
 
 class FileInitializer:
@@ -7,11 +8,13 @@ class FileInitializer:
         self.database_folder = os.path.join(os.path.dirname(__file__), database_folder)
         self.catalogue_path = os.path.join(self.database_folder, "component_catalogue.json")
         self.config_path = os.path.join(self.database_folder, "config.json")
+        self.image_cache_path = os.path.join(self.database_folder, "image_cache.db")
 
     def initialize_files(self):
         self.ensure_folder()
         created_config = self.ensure_config()
         self.ensure_catalogue()
+        self.ensure_image_cache()
 
         # If config was just created, prompt user
         if created_config:
@@ -37,7 +40,6 @@ class FileInitializer:
             print(f"Creating new config.json at {self.config_path}")
             default_config = {
                 "API": {
-                    "GOOGLE_SCRIPT_URL": "https://your-google-web-app-url",
                     "DIGIKEY_CLIENT_ID": "YOUR CLIENT ID",
                     "DIGIKEY_CLIENT_SECRET": "YOUR CLIENT SECRET"
                 },
@@ -48,10 +50,27 @@ class FileInitializer:
                 },
                 "FILES": {
                     "COMPONENT_CATALOGUE": "Databases/component_catalogue.json",
-                    "CHANGELOG": "Databases/changelog.txt"
+                    "CHANGELOG": "Databases/changelog.txt",
+                    "IMAGE_CACHE": "Databases/image_cache.db"
                 }
             }
             with open(self.config_path, "w") as f:
                 json.dump(default_config, f, indent=4)
             return True  # config was created
         return False  # config already existed
+
+    def ensure_image_cache(self):
+        if not os.path.exists(self.image_cache_path):
+            print(f"Creating new image_cache.db at {self.image_cache_path}")
+            conn = sqlite3.connect(self.image_cache_path)
+            cursor = conn.cursor()
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS image_cache (
+                part_number TEXT PRIMARY KEY,
+                image BLOB NOT NULL,
+                etag TEXT,
+                fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """)
+            conn.commit()
+            conn.close()

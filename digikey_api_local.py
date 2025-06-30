@@ -1,4 +1,10 @@
+from image_cache import ImageCacheEntry, Image_Cache
+from datetime import datetime, timezone
+from PIL import Image
+from io import BytesIO
 import requests
+import logging
+logging.basicConfig(level=logging.DEBUG)
 import json
 import os
 import time
@@ -10,6 +16,7 @@ class Digikey_API_Call:
     ACCESS_TOKEN: str
     def __init__(self):
         self.config_file = os.path.join(os.path.dirname(__file__), "Databases", "config.json")
+        self.image_cache = Image_Cache()
         self.load_config()
 
     def load_config(self):
@@ -33,16 +40,17 @@ class Digikey_API_Call:
             self.CLIENT_SECRET = None
 
     def refresh_access_token(self):
-
         #Check if we have a client id and secret.
         if not self.CLIENT_ID or not self.CLIENT_SECRET:
             messagebox.showerror("API Error", "Missing Digikey client ID or secret!")
             return None
         
 
-        digiKeyAuth = {'client_id': self.CLIENT_ID ,
-               'client_secret': self.CLIENT_SECRET,
-               'grant_type':'client_credentials'}
+        digiKeyAuth = {
+            'client_id': self.CLIENT_ID ,
+            'client_secret': self.CLIENT_SECRET,
+            'grant_type':'client_credentials'
+        }
         
         try:
             tokenRequest = requests.post("https://api.digikey.com/v1/oauth2/token", data=digiKeyAuth)
@@ -56,7 +64,8 @@ class Digikey_API_Call:
         self.ACCESS_TOKEN = tokenRequest.json()["access_token"]
         self.TOKEN_EXPIRES = time.time() + tokenRequest.json()["expires_in"]
 
-    def _handle_digikey_error(self, http_error):
+    @staticmethod
+    def _handle_digikey_error(http_error):
         match http_error.response.status_code:
             case 400:
                 messagebox.showerror("Bad Request", "Input model is invalid or malformed.")
@@ -83,47 +92,49 @@ class Digikey_API_Call:
             case _:
                 messagebox.showerror("HTTP Error", f"Unexpected error {http_error.response.status_code}: {http_error.response.text}")
 
-    def fetch_media(self, part_number):
-        """Uses Digikey API to fetch media"""
-        
-        # Check that we have a token and that it is not expired.
-        if not self.ACCESS_TOKEN or time.time() > self.TOKEN_EXPIRES:
-            self.refresh_access_token()
+    @staticmethod
+    def _show_error_and_return_none(msg: str, code: int):
+        messagebox.showerror("Failed to Fetch Image", f"{msg}.\nHTTP ERROR: {code}")
+        return None
 
-        mediaHeaders = {
-            'Authorization': 'Bearer ' + self.ACCESS_TOKEN,
-            'X-DIGIKEY-Client-Id': self.CLIENT_ID,
-            'X-DIGIKEY-Locale-Site': 'US',
-            'X-DIGIKEY-Locale-Language': 'en', 
-            'X-DIGIKEY-Locale-Currency': 'USD',
-            'Accept': 'application/json'
-        }
+    def fetch_image_data(self, photo_url: str, part_number: str):
+        cache_entry = self.image_cache.request_entry(part_number=part_number.strip())
+        if cache_entry:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+                "If-None-Match": cache_entry.etag
+            }
+        else:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+            }
 
-        mediaParams = {
-            'partNumber': part_number.strip(),
-            'recordCount': 10,
-            'mediaType': 'Image'
-        }
+        response = requests.get(photo_url, headers=headers, timeout=5)
+        if response.status_code == 304: # the etag matches so just return the cached entry
+            return cache_entry
+        elif response.status_code == 200: 
+            if cache_entry: # entry exists but not same etag so update and return
+                cache_entry.image = response.content
+                cache_entry.etag = response.headers.get('ETag')
+                cache_entry.fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                return cache_entry
+            else: # doesnt exist so build entry object and return
+                return ImageCacheEntry(
+                    dk_part_number=part_number,
+                    image=response.content,
+                    etag=response.headers.get('ETag'),
+                    fetched_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                )
+        # TODO:tariq handle httperror while requesting
+        else:
+            return cache_entry if cache_entry else self._show_error_and_return_none("Failed to load image.", 
+                                                                                    response.status_code)
 
-        try:
-            response = requests.get(url='https://api.digikey.com/products/v4/productsearch/media', headers=mediaHeaders, data=mediaParams)
-            response.raise_for_status()
-            print (json.dumps(response.json(), indent=2))
 
-        except requests.exceptions.HTTPError as http_error:
-            self._handle_digikey_error(http_error)
-
-            
-
-        except requests.exceptions.RequestException as req_error:
-            messagebox.showerror("Connection Error", f"A network error happened: \n{str(req_error)}")
-
-
-
-
-    def fetch_part_details(self, part_number):
+    def fetch_part_details(self, part_number: str):
         """Fetches part details from the API"""
-        
         # Check that we have a token and that it is not expired.
         if not self.ACCESS_TOKEN or time.time() > self.TOKEN_EXPIRES:
             self.refresh_access_token()
@@ -144,19 +155,30 @@ class Digikey_API_Call:
             'Offset': 0,
             'FilterOptionsRequest': {} # Optional filters
         }
+
         try:
-            response = requests.post('https://api.digikey.com/products/v4/search/keyword', data=json.dumps(searchParams), headers=searchHeaders)
+            logging.debug("Requesting the data model from digikey.")
+            response = requests.post('https://api.digikey.com/products/v4/search/keyword', 
+                                     data=json.dumps(searchParams), 
+                                     headers=searchHeaders, 
+                                     timeout=5)
             
             response.raise_for_status()  # Raise error for HTTP issues
 
-            if response.text.lstrip().startswith("<!DOCTYPE html>"):
-                return None
+            # shouldn't need to check this because if response is error, then 
+            # status code would reflect that and be caught by the exception
+            # if response.text.lstrip().startswith("<!DOCTYPE html>"):
+            #     return None
 
             result = response.json()["Products"][0]
+
+            # this would happen if there is some error on DIGIKEY side,
+            # they accepted our token and they're returning a success code
+            # but the body could be incorrect so we check
             if "error" in result:
                 messagebox.showerror("API Error", f"Error: {result['error']}")
                 return None
-            
+
             price_val = result.get('UnitPrice', 0.0)
             try:
                 price = float(price_val)

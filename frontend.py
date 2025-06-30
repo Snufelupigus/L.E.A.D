@@ -11,10 +11,11 @@ from io import BytesIO
 import webbrowser
 
 class Frontend:
-    def __init__(self, backend, digikeyAPI, ledControl):
+    def __init__(self, backend, digikeyAPI, ledControl, imageCache):
         self.backend = backend
         self.digikeyAPI = digikeyAPI
         self.ledControl = ledControl
+        self.imageCache = imageCache
         self.current_frame = None
         self.current_menu = None
         self.test_mode = False
@@ -280,19 +281,19 @@ class Frontend:
 
             if not component_data["part_number"]:
                 messagebox.showerror("Error", "Part Number is required!")
-                return
+                return None
             try:
                 component_data["count"] = int(component_data["count"])
             except ValueError:
                 messagebox.showerror("Error", "Count must be an integer!")
-                return
+                return None
             try:
                 component_data["low_stock"] = int(component_data["low_stock"])
             except ValueError:
                 messagebox.showerror("Error", "Low Stock Threshold must be a number!")
-                return
+                return None
             
-            if self.backend.check_duplicate(component_data)== False: 
+            if not self.backend.check_duplicate(component_data): 
                 self.ledControl.turn_off_recent()
                 update_add_tree()
                 for key, (_, widget) in fields.items():
@@ -300,7 +301,7 @@ class Frontend:
                         widget.delete(0, END)
                     else:
                         component_type_var.set("Other")
-                return
+                return None
             
             fetch_digikey_data(self)
         
@@ -325,6 +326,9 @@ class Frontend:
                     messagebox.showerror("Error", "Count must be an integer!")
                     return
                 
+                # TODO:tariq since response is an object with the photoUrl already extracted
+                # handle fetching the image here instead of in the fetch_part_details
+                # that way the sequencing is clear to people who have to read this
                 response = self.digikeyAPI.fetch_part_details(component_data['part_number'])
                 if response == None:
                     if askyesno("Not Found", "No Digikey Part Found, Add Anyway?"):
@@ -356,38 +360,47 @@ class Frontend:
                             else:
                                 component_type_var.set("Other")
                     else:
-                        return
-                else:
-                    #found digikey component
-                    if response:
-                        if part is None:
-                            response["part_info"]["count"] = component_data["count"]
-                            response["metadata"]["low_stock"] = component_data["low_stock"]
-                            response['part_info']['location'] = component_data['location']
+                        return None
+                else: #found digikey component
+                    if response.get("metadata", {}).get("photo_url") == "N/A":
+                        messagebox.showerror("No Image", "No image URL to load.")
+                    else:
+                        image_entry = self.digikeyAPI.fetch_image_data(
+                            photo_url=response.get("metadata", {}).get("photo_url"),
+                            part_number=response.get("part_info", {}).get("part_number")
+                        )
+                        self.imageCache.store_blob(image_entry)
+                    if part is None:
+                        response["part_info"]["count"] = component_data["count"]
+                        response["metadata"]["low_stock"] = component_data["low_stock"]
+                        response['part_info']['location'] = component_data['location']
 
-                        #Create dic for duplicate checking
-                        component = {"part_number":response["part_info"]["part_number"], "count":response["part_info"]["count"]}
+                    #Create dic for duplicate checking
+                    component = {
+                        "part_number":response["part_info"]["part_number"],
+                        "count":response["part_info"]["count"]
+                    }
 
-                        if self.backend.check_duplicate(component)== False: 
-                            self.ledControl.turn_off_recent()
-                            update_add_tree()
-                            
-                            for key, (_, widget) in fields.items():
-                                if isinstance(widget, Entry):
-                                    widget.delete(0, END)
-                                else:
-                                    component_type_var.set("Other")
-
-                            return
-                
-                        self.backend.add_component(response)
-                        messagebox.showinfo("Success", "Component added successfully!")
-
+                    if self.backend.check_duplicate(component) == False: 
+                        self.ledControl.turn_off_recent()
+                        update_add_tree()
+                        
                         for key, (_, widget) in fields.items():
                             if isinstance(widget, Entry):
                                 widget.delete(0, END)
                             else:
                                 component_type_var.set("Other")
+
+                        return None
+            
+                    self.backend.add_component(response)
+                    messagebox.showinfo("Success", "Component added successfully!")
+
+                    for key, (_, widget) in fields.items():
+                        if isinstance(widget, Entry):
+                            widget.delete(0, END)
+                        else:
+                            component_type_var.set("Other")
 
             update_add_tree()
         
