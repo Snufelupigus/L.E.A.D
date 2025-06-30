@@ -21,7 +21,7 @@ class Image_Cache:
     # enter and exit are for use in with blocks, e.g.
     with Image_Cache() as cache:
         if not cache.already_exists("...."):
-            cache.store_blob(entry)
+            cache.store_entry(entry)
     '''
 
     def __enter__(self): 
@@ -86,7 +86,7 @@ class Image_Cache:
             )
         return None
 
-    def store_blob(self, entry: ImageCacheEntry | None):
+    def store_entry(self, entry: ImageCacheEntry | None):
         if not entry:
             logging.debug('Passed entry was None.')
             return None

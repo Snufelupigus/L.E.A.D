@@ -369,7 +369,7 @@ class Frontend:
                             photo_url=response.get("metadata", {}).get("photo_url"),
                             part_number=response.get("part_info", {}).get("part_number")
                         )
-                        self.imageCache.store_blob(image_entry)
+                        self.imageCache.store_entry(image_entry)
                     if part is None:
                         response["part_info"]["count"] = component_data["count"]
                         response["metadata"]["low_stock"] = component_data["low_stock"]
