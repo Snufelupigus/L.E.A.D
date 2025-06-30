@@ -51,6 +51,23 @@ class Backend:
 
         self.schedule_backup(interval_seconds=600)
 
+    def normalize_part_number(self, part_number):
+            """
+            Removes common Digi-Key packaging suffixes (CT, TR, DKR, -1, -2) if they appear
+            before the final -ND or similar suffix.
+            """
+            part_number = part_number.strip().lower()
+
+            # Match and remove packaging codes in the middle
+            # e.g. 5272-SI2302DS-EVTR-ND -> 5272-SI2302DS-EV-ND
+            packaging_suffixes = ['ct', 'tr', 'dkr', '-1', '-2', '-3']
+            pattern = re.compile(rf"(.*?)-({'|'.join(packaging_suffixes)})-(nd)$", re.IGNORECASE)
+            match = pattern.match(part_number)
+
+            if match:
+                return f"{match.group(1)}-{match.group(3)}"
+            return part_number
+
     def load_components(self):
         try:
             with open(self.data_file, "r") as file:
@@ -161,10 +178,18 @@ class Backend:
 
     def search_components(self, query):
         query = query.lower()
+        normalized_query = self.normalize_part_number(query)
+
+        def match_any_field(comp_dict):
+            for value in comp_dict.values():
+                val_str = str(value).lower()
+                if query in val_str or normalized_query in self.normalize_part_number(val_str):
+                    return True
+            return False
+
         return [
             comp for comp in self.components
-            if any(query in str(value).lower() for value in comp["part_info"].values())
-            or any(query in str(value).lower() for value in comp["metadata"].values())
+            if match_any_field(comp["part_info"]) or match_any_field(comp["metadata"])
         ]
 
     def edit_component(self, index, updated_component):
@@ -211,13 +236,6 @@ class Backend:
         }
         return parsed_data
     
-    def normalize_part_number(part_number):
-        """
-        Removes common Digi-Key packaging suffixes from the part number.
-        """
-        part_number = part_number.strip().lower()
-        suffix_pattern = r"(-1|-2|-3|-ct|-dkr|-tr)$"
-        return re.sub(suffix_pattern, "", part_number)
 
     def check_duplicate(self, component):
         new_raw = component["part_number"].strip().lower()
@@ -319,40 +337,45 @@ class Backend:
             if count < low_stock_value_int:
                 low_stock_components.append(comp)
         return low_stock_components
-    
+
     def parse_bom(self, file_path):
         """
         Read a BOM CSV, drop any rows with an empty Part column
         or a “Total” footer, and annotate each row with:
-           - found:   True/False
-           - location
-           - current_count
+        - found:   True/False
+        - location
+        - current_count
         Returns a list of dicts ready for display.
         """
         bom_list = []
-        # adjust delimiter or encoding if needed
+
         with open(file_path, newline='') as f:
             reader = csv.reader(f)
             header = next(reader, None)  # skip header line
+
             for cols in reader:
-                # assume columns: Part, Digikey#, Manufacturer#, Price, # of Parts
                 if len(cols) < 5:
                     continue
                 part, digikey, manufacturer, price, qty = [c.strip() for c in cols[:5]]
-                # skip blank part rows
+
                 if not part:
                     continue
-                # stop at a “Total” row if they label it in Part
                 if part.lower().startswith("total"):
                     break
 
-                # look up this digikey in inventory
+                # Normalize BOM part number for comparison
+                normalized_digikey = self.normalize_part_number(digikey)
+
+                # Try to match against components using normalized part numbers
                 found = False
                 location = None
                 current_count = None
+
                 for comp in self.components:
-                    pn = comp["part_info"]["part_number"].strip().lower()
-                    if pn == digikey.lower():
+                    comp_part = comp["part_info"].get("part_number", "").strip()
+                    normalized_comp = self.normalize_part_number(comp_part)
+
+                    if normalized_comp == normalized_digikey:
                         found = True
                         location = comp["part_info"].get("location")
                         try:
