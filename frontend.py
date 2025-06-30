@@ -326,9 +326,6 @@ class Frontend:
                     messagebox.showerror("Error", "Count must be an integer!")
                     return
                 
-                # TODO:tariq since response is an object with the photoUrl already extracted
-                # handle fetching the image here instead of in the fetch_part_details
-                # that way the sequencing is clear to people who have to read this
                 response = self.digikeyAPI.fetch_part_details(component_data['part_number'])
                 if response == None:
                     if askyesno("Not Found", "No Digikey Part Found, Add Anyway?"):
@@ -558,7 +555,7 @@ class Frontend:
                 print(barcode_data)
 
                 #Check for duplicates
-                if self.backend.check_duplicate(barcode_data)== False: 
+                if self.backend.check_duplicate(barcode_data) == False: 
                     messagebox.showinfo("Found Duplicate:", barcode_data['part_number'])
 
                 else:
