@@ -98,7 +98,7 @@ class Digikey_API_Call:
         return None
 
     def fetch_image_data(self, photo_url: str, part_number: str):
-        cache_entry = self.image_cache.request_entry(dk_part_number=part_number.strip())
+        cache_entry = self.image_cache.request_entry(part_number=part_number.strip())
         if cache_entry:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -122,7 +122,7 @@ class Digikey_API_Call:
                 return cache_entry
             else: # doesnt exist so build entry object and return
                 return ImageCacheEntry(
-                    dk_part_number=response.headers.get('DigiKeyProductNumber'),
+                    dk_part_number=part_number,
                     image=response.content,
                     etag=response.headers.get('ETag'),
                     fetched_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

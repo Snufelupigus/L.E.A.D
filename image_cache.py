@@ -54,18 +54,19 @@ class Image_Cache:
         return None
 
     def already_exists(self, part_number: str | None):
+        logging.debug(f"Checking existence of part_number = {part_number!r}")
         cursor = self.conn.cursor()
         cursor.execute("""
             SELECT 1
             FROM image_cache 
             WHERE part_number = ?
         """, (part_number,)) # single comma to make it a tuple
-        cursor.close()
         found = cursor.fetchone() is not None
+        cursor.close()
         return found
 
-    def request_entry(self, dk_part_number: str | None):
-        if not dk_part_number:
+    def request_entry(self, part_number: str | None):
+        if part_number is None:
             return None
 
         cursor = self.conn.cursor()
@@ -73,7 +74,7 @@ class Image_Cache:
             SELECT part_number, image, etag, fetched_at
             FROM image_cache 
             WHERE part_number = ?
-        """, (dk_part_number,)) # single comma to make it a tuple
+        """, (part_number,)) # single comma to make it a tuple
         row = cursor.fetchone()
         cursor.close()
 
@@ -86,7 +87,10 @@ class Image_Cache:
             )
         return None
 
-    def store_blob(self, entry: ImageCacheEntry):
+    def store_blob(self, entry: ImageCacheEntry | None):
+        if not entry:
+            logging.debug('Passed entry was None.')
+            return None
         cursor = self.conn.cursor()
         if self.already_exists(entry.dk_part_number):
             cursor.execute("""
