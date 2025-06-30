@@ -2,6 +2,8 @@
 /archived_code/
 /backups/
 *.pyc
+*.xls
+*.xlsx
 /.vscode/
 config.json
 changelog.txt
