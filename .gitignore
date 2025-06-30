@@ -1,4 +1,5 @@
 /Databases/
+/archived_code/
 /backups/
 *.pyc
 /.vscode/
