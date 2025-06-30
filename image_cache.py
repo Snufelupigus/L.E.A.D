@@ -54,7 +54,6 @@ class Image_Cache:
         return None
 
     def already_exists(self, part_number: str | None):
-        logging.debug(f"Checking existence of part_number = {part_number!r}")
         cursor = self.conn.cursor()
         cursor.execute("""
             SELECT 1
@@ -66,7 +65,7 @@ class Image_Cache:
         return found
 
     def request_entry(self, part_number: str | None):
-        if part_number is None:
+        if not part_number:
             return None
 
         cursor = self.conn.cursor()
