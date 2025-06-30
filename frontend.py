@@ -489,7 +489,7 @@ class Frontend:
                     header_frame = Frame(rows_frame)
                     header_frame.pack(fill="x", padx=10, pady=5)
                     Label(header_frame, text="Barcode", width=40, anchor="w", font=("Arial", 10, "bold")).grid(row=0, column=0, padx=0)
-                    Label(header_frame, text="Low-Stock Threshold", width=20, anchor="w", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=20)
+                    Label(header_frame, text="Low-Stock Threshold", width=20, anchor="w", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=5)
 
                 row_frame = Frame(rows_frame, pady=5)
                 row_frame.pack(fill="x", padx=10)

@@ -4,6 +4,7 @@ import os
 import time
 import csv
 import shutil
+import re
 import difflib
 import datetime
 import threading
@@ -209,39 +210,40 @@ class Backend:
             "count": count,
         }
         return parsed_data
+    
+    def normalize_part_number(part_number):
+        """
+        Removes common Digi-Key packaging suffixes from the part number.
+        """
+        part_number = part_number.strip().lower()
+        suffix_pattern = r"(-1|-2|-3|-ct|-dkr|-tr)$"
+        return re.sub(suffix_pattern, "", part_number)
 
     def check_duplicate(self, component):
-        """
-        Checks if the component is a duplicate of an existing one using fuzzy matching.
-        If a near duplicate is found, it pops up a message box asking the user if they meant the similar part.
-        If the user confirms, it updates the count of the existing component, logs the change, and returns False.
-        If no duplicate is found, it returns True.
-        
-        Parameters:
-            component (dict): A dictionary containing at least "part_info" with keys "part_number" and "count".
-        
-        Returns:
-            bool: True if the component is new (i.e. not a duplicate), False if it is a duplicate.
-        """
-        # Get the new part number (lowercased) and count.
-        new_part_number = component["part_number"].strip().lower()
+        new_raw = component["part_number"].strip().lower()
+        new_part_number = self.normalize_part_number(new_raw)
+
         try:
             new_count = int(component.get("count", 0))
         except ValueError:
             new_count = 0
 
-        # Get all existing part numbers from the catalogue.
         existing_components = self.get_all_components()
-        existing_parts = [
-            comp.get("part_info", {}).get("part_number", "").strip().lower() 
-            for comp in existing_components 
-            if comp.get("part_info", {}).get("part_number")
-        ]
+        part_map = {}  # maps normalized part → full part
+        normalized_parts = []
 
-        # Exact duplicate check.
-        if new_part_number in existing_parts:
+        for comp in existing_components:
+            part = comp.get("part_info", {}).get("part_number", "").strip().lower()
+            if part:
+                normalized = self.normalize_part_number(part)
+                part_map[normalized] = part  # last one wins if duplicates
+                normalized_parts.append(normalized)
+
+        # Exact match (normalized)
+        if new_part_number in normalized_parts:
+            actual_match = part_map[new_part_number]
             for comp in existing_components:
-                if comp.get("part_info", {}).get("part_number", "").strip().lower() == new_part_number:
+                if comp.get("part_info", {}).get("part_number", "").strip().lower() == actual_match:
                     try:
                         existing_count = int(comp["part_info"].get("count", 0))
                     except ValueError:
@@ -249,30 +251,32 @@ class Backend:
                     updated_count = existing_count + new_count
                     comp["part_info"]["count"] = updated_count
 
-                    messagebox.showinfo("Found Duplicate", f"Component {comp['part_info']['part_number']} already exists.\nAdded {comp['part_info']['count']} units.")
+                    messagebox.showinfo("Found Duplicate", f"Component {actual_match} already exists.\nAdded {new_count} units.")
                     loc = comp["part_info"]["location"]
                     self.ledControl.set_led_on(loc, 0, 255, 0)
                     messagebox.showinfo("Fill Vial", f"Fill vial at {loc}.")
                     self.ledControl.turn_off_led(loc)
 
-                    # Log the change.
                     self.log_change(
-                        f"Updated component '{new_part_number}' count from {existing_count} to {updated_count} (exact duplicate)."
+                        f"Updated component '{actual_match}' count from {existing_count} to {updated_count} (exact match after normalizing)."
                     )
 
                     self.save_components()
                     return False
 
-        # Fuzzy matching to check for near duplicates.
-        close_matches = difflib.get_close_matches(new_part_number, existing_parts, n=1, cutoff=0.8)
+        # Fuzzy match using normalized parts
+        close_matches = difflib.get_close_matches(new_part_number, normalized_parts, n=1, cutoff=0.8)
         if close_matches:
+            suggested_norm = close_matches[0]
+            suggested_actual = part_map[suggested_norm]
+
             response = messagebox.askyesno(
                 "Possible Duplicate",
-                f"Did you mean '{close_matches[0]}' instead of '{new_part_number}'?"
+                f"Did you mean '{suggested_actual}' instead of '{new_raw}'?"
             )
             if response:
                 for comp in existing_components:
-                    if comp.get("part_info", {}).get("part_number", "").strip().lower() == close_matches[0]:
+                    if comp.get("part_info", {}).get("part_number", "").strip().lower() == suggested_actual:
                         try:
                             existing_count = int(comp["part_info"].get("count", 0))
                         except ValueError:
@@ -280,19 +284,20 @@ class Backend:
                         updated_count = existing_count + new_count
                         comp["part_info"]["count"] = updated_count
 
-                        messagebox.showinfo("Found Duplicate", f"Component {comp['part_info']['part_number']} already exists.\nAdded {comp['part_info']['count']} units.")
+                        messagebox.showinfo("Found Duplicate", f"Component {suggested_actual} already exists.\nAdded {new_count} units.")
                         loc = comp["part_info"]["location"]
                         self.ledControl.set_led_on(loc, 0, 255, 0)
                         messagebox.showinfo("Fill Vial", f"Fill vial at {loc}.")
+                        self.ledControl.turn_off_led(loc)
 
                         self.log_change(
-                            f"Updated component '{close_matches[0]}' count from {existing_count} to {updated_count} (matched '{new_part_number}')."
+                            f"Updated component '{suggested_actual}' count from {existing_count} to {updated_count} (fuzzy matched to '{new_raw}')."
                         )
+
                         self.save_components()
                         return False
 
-        # No duplicate found.
-        return True
+        return True  # No match
 
     def get_low_stock_components(self):
         """
