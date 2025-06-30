@@ -51,22 +51,17 @@ class Backend:
 
         self.schedule_backup(interval_seconds=600)
 
+    import re
+
     def normalize_part_number(self, part_number):
-            """
-            Removes common Digi-Key packaging suffixes (CT, TR, DKR, -1, -2) if they appear
-            before the final -ND or similar suffix.
-            """
-            part_number = part_number.strip().lower()
+        part_number = part_number.strip().lower()
+        # Match formats like ...TR-ND, ...CT-ND, ...DKR-ND, ...1-ND, etc.
+        pattern = re.compile(r"^(.*?)-(?:ct|tr|dkr|1|2|3)-(nd)$", re.IGNORECASE)
+        match = pattern.match(part_number)
+        if match:
+            return f"{match.group(1)}-{match.group(2)}"
+        return part_number
 
-            # Match and remove packaging codes in the middle
-            # e.g. 5272-SI2302DS-EVTR-ND -> 5272-SI2302DS-EV-ND
-            packaging_suffixes = ['ct', 'tr', 'dkr', '-1', '-2', '-3']
-            pattern = re.compile(rf"(.*?)-({'|'.join(packaging_suffixes)})-(nd)$", re.IGNORECASE)
-            match = pattern.match(part_number)
-
-            if match:
-                return f"{match.group(1)}-{match.group(3)}"
-            return part_number
 
     def load_components(self):
         try:
@@ -236,7 +231,6 @@ class Backend:
         }
         return parsed_data
     
-
     # TODO:tariq maybe seperate the check from the actual updating the part
     def check_duplicate(self, component):
         new_raw = component["part_number"].strip().lower()
@@ -349,7 +343,10 @@ class Backend:
         Returns a list of dicts ready for display.
         """
         bom_list = []
-
+        print("First 5 inventory parts:")
+        for i, c in enumerate(self.get_all_components()[:5]):
+            print(f"{i}: {c['part_info']['part_number']}")
+        print("BOM checkout inventory size:", len(self.get_all_components()))
         with open(file_path, newline='') as f:
             reader = csv.reader(f)
             header = next(reader, None)  # skip header line
@@ -364,16 +361,14 @@ class Backend:
                 if part.lower().startswith("total"):
                     break
 
-                # Normalize BOM part number for comparison
                 normalized_digikey = self.normalize_part_number(digikey)
 
-                # Try to match against components using normalized part numbers
                 found = False
                 location = None
                 current_count = None
 
-                for comp in self.components:
-                    comp_part = comp["part_info"].get("part_number", "").strip()
+                for comp in self.get_all_components():
+                    comp_part = comp.get("part_info", {}).get("part_number", "").strip()
                     normalized_comp = self.normalize_part_number(comp_part)
 
                     if normalized_comp == normalized_digikey:
@@ -384,6 +379,9 @@ class Backend:
                         except ValueError:
                             current_count = None
                         break
+
+                print(f"Comparing normalized BOM part: {normalized_digikey}")
+                print(f"Against inventory part: {normalized_comp}")
 
                 bom_list.append({
                     "part":          part,
@@ -399,11 +397,6 @@ class Backend:
         return bom_list
 
     def process_bom_out(self, bom_list, board_name):
-        """
-        For each BOM row (dict with "digikey", "quantity", "found"):
-        - If count < needed, skip subtraction and status "Out of Stock"
-        - Else subtract and status "Updated"
-        """
         results = []
         for row in bom_list:
             digikey = row.get("digikey", "").strip()
@@ -412,16 +405,19 @@ class Backend:
             except ValueError:
                 quantity_used = 0
 
+            found_match = False
+
             if row.get("found"):
-                for comp in self.components:
-                    if comp["part_info"].get("part_number","").strip().lower() == digikey.lower():
+                for comp in self.get_all_components():
+                    inv_part = comp["part_info"].get("part_number", "").strip()
+                    if self.normalize_part_number(inv_part) == self.normalize_part_number(digikey):
+                        found_match = True
                         try:
-                            current = int(comp["part_info"].get("count",0))
+                            current = int(comp["part_info"].get("count", 0))
                         except ValueError:
                             current = 0
 
                         if current < quantity_used:
-                            # OUT OF STOCK — no subtraction
                             results.append({
                                 "part": digikey,
                                 "remaining": current,
@@ -437,7 +433,8 @@ class Backend:
                                 "status": "Updated"
                             })
                         break
-            else:
+
+            if not found_match:
                 results.append({
                     "part": digikey,
                     "remaining": "N/A",
