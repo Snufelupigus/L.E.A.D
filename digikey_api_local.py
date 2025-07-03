@@ -111,27 +111,39 @@ class Digikey_API_Call:
                     "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
             }
 
-        response = requests.get(photo_url, headers=headers, timeout=5)
-        if response.status_code == 304: # the etag matches so just return the cached entry
-            return cache_entry
-        elif response.status_code == 200: 
-            if cache_entry: # entry exists but not same etag so update and return
-                cache_entry.image = response.content
-                cache_entry.etag = response.headers.get('ETag')
-                cache_entry.fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            response = requests.get(photo_url, headers=headers, timeout=5)
+
+            if not response:
+                return None
+
+            if response.status_code == 304: # the etag matches so just return the cached entry
                 return cache_entry
-            else: # doesnt exist so build entry object and return
+
+            elif response.status_code == 200: 
+                if cache_entry: # entry exists but not same etag so update and return
+                    if cache_entry.etag == response.headers.get("ETag"): # shouldnt have to check, but DigiKey doesn't seem to honour If-None-Match
+                        logging.debug("Etags matched, returning cached entry.")
+                        return cache_entry
+                    cache_entry.image = response.content
+                    cache_entry.etag = response.headers.get('ETag')
+                    cache_entry.fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                    self.image_cache.store_entry(cache_entry)
+                    return cache_entry
+
                 return ImageCacheEntry(
                     dk_part_number=part_number,
                     image=response.content,
                     etag=response.headers.get('ETag'),
                     fetched_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                 )
-        # TODO:tariq handle httperror while requesting
-        else:
-            return cache_entry if cache_entry else self._show_error_and_return_none("Failed to load image.", 
-                                                                                    response.status_code)
-
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as err:
+            code = err.response.status_code if err.response else None
+            return self._show_error_and_return_none(msg=err, code=code)
+        except requests.exceptions.RequestException as err:
+            code = err.response.status_code if err.response else None
+            return self._show_error_and_return_none(msg=err, code=code)
 
     def fetch_part_details(self, part_number: str):
         """Fetches part details from the API"""
