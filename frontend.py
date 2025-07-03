@@ -6,6 +6,8 @@ from tkinter.filedialog import asksaveasfilename, askopenfilename
 import os
 import signal
 
+from PIL import Image, ImageTk
+
 import time
 from io import BytesIO
 import webbrowser
@@ -610,7 +612,7 @@ class Frontend:
             for widget in self.details_frame.winfo_children():
                 widget.destroy()
             Label(self.details_frame, text="No component selected", justify="left").pack(fill="both", expand=True)
-            return
+            return None
 
         item = tree.item(selected[0], "values")
         part_number = item[0]
@@ -619,7 +621,7 @@ class Frontend:
         component = next((comp for comp in self.backend.get_all_components()
                         if comp["part_info"]["part_number"].strip().lower() == part_number.strip().lower()), None)
         if not component:
-            return
+            return None
 
         # TURN OFF previously highlighted LED
         new_location = component["part_info"].get("location", "").strip()
@@ -634,19 +636,24 @@ class Frontend:
         for widget in self.details_frame.winfo_children():
             widget.destroy()
 
-        # Create two subframes: one for Part Info and one for Meta Data
+        # Create three subframes: Part Info, Metadata, Image
         part_info_frame = Frame(self.details_frame, bd=1, relief="solid", padx=5, pady=5, width=250)
         part_info_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-        meta_frame = Frame(self.details_frame, bd=1, relief="solid", padx=5, width=250, pady=5)
+        meta_frame = Frame(self.details_frame, bd=1, relief="solid", padx=5, pady=5, width=250)
         meta_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        image_frame = Frame(self.details_frame, bd=1, relief="solid", padx=5, pady=5, width=250)
+        image_frame.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
+
         self.details_frame.columnconfigure(0, weight=1, minsize=250)
         self.details_frame.columnconfigure(1, weight=1, minsize=250)
+        self.details_frame.columnconfigure(2, weight=1, minsize=250)
         #meta_frame.grid_propagate(False)
         #part_info_frame.grid_propagate(False)
 
         # Headers
         Label(part_info_frame, text="Part Info", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=0)
         Label(meta_frame, text="Meta Data", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=0)
+        Label(image_frame, text="Image", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=0)
 
         # Populate Part Info (each key-value pair on its own row)
         row_idx = 1
@@ -664,6 +671,23 @@ class Frontend:
         Label(meta_frame, text=component["metadata"]["description"], anchor="w").grid(row=3, column=1, sticky="w", padx=(100,2), pady=2)
         Label(meta_frame, text=f"In Use?:", anchor="w").grid(row=4, column=1, sticky="w", padx=2, pady=2)
         Label(meta_frame, text=component["metadata"]["in_use"], anchor="w").grid(row=4, column=1, sticky="w", padx=(100,2), pady=2)
+
+        # Fetch Image
+        image_entry = self.digikeyAPI.fetch_image_data(
+            photo_url=component.get("metadata", {}).get("photo_url", ""),
+            part_number=component.get("part_info", {}).get("part_number", "")
+        )
+        if image_entry:
+            pil_image = Image.open(BytesIO(image_entry.image))
+            pil_image.thumbnail((200,200))
+
+            tk_image = ImageTk.PhotoImage(pil_image)
+
+            image_label = Label(image_frame, image=tk_image)
+            image_label.image = tk_image
+            image_label.grid(row=0, column=0, padx=5, pady=5)
+        else:
+            Label(image_frame, text="No Image Available").grid(row=0, column=0, padx=5, pady=5)
 
         highlight_state = {"on": False}  # Track whether the LED is currently highlighted.
 
