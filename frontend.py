@@ -29,6 +29,11 @@ class Frontend:
         self.root.geometry("1250x750")
         self.root.state('zoomed')
 
+        # better autoscaling
+        self.root.grid_rowconfigure( 0, weight=1 )
+        self.root.grid_columnconfigure( 0, weight=1 )
+        self.root.minsize(1000, 600)
+
         self.create_menu()
         self.root.focus_force()
 
@@ -97,6 +102,19 @@ class Frontend:
             self.current_frame.unbind_all("<Return>")
             self.current_frame.destroy()
 
+        # Create new frame with proper configuration
+        self.current_frame = Frame(self.root)
+        self.current_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Configure the main frame for responsive behavior
+        # self.current_frame.grid_columnconfigure(0, weight=0)  # Labels don't expand
+        # self.current_frame.grid_columnconfigure(1, weight=0)  # Entry fields don't expand  
+        # self.current_frame.grid_columnconfigure(2, weight=0)  # Buttons don't expand
+        # self.current_frame.grid_columnconfigure(3, weight=1)  # Details frame expands
+        # self.current_frame.grid_columnconfigure(4, weight=1)  # Details frame expands
+
+
+
     def show_home(self):
         self.clear_frame()
         self.current_frame = Frame(self.root)
@@ -164,53 +182,428 @@ class Frontend:
         low_stock_tree.bind("<Double-Button-1>", open_product)
 
     def show_search(self):
+        # Initialize class attributes for widget references
+        self.results_label = None
+        self.action_button_frame = None
+        
         self.clear_frame()
         self.current_frame = Frame(self.root)
-        self.current_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        self.current_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Configure main grid - 5 rows, 2 columns
+        self.current_frame.grid_rowconfigure(0, weight=0) # Search label - fixed
+        self.current_frame.grid_rowconfigure(1, weight=0) # Search entry - fixed  
+        self.current_frame.grid_rowconfigure(2, weight=1) # Details section - expands
+        self.current_frame.grid_rowconfigure(3, weight=1) # Table section - expands
+        self.current_frame.grid_rowconfigure(4, weight=0) # Buttons - fixed
+        
+        self.current_frame.grid_columnconfigure(0, weight=1) # Left column expands
+        self.current_frame.grid_columnconfigure(1, weight=1) # Right column expands
 
-        self.current_frame.columnconfigure(0, weight=0)
-        self.current_frame.columnconfigure(1, weight=0)
-        self.current_frame.columnconfigure(2, weight=0)
-        self.current_frame.columnconfigure(3, weight=1)
-        self.current_frame.columnconfigure(4, weight=1)
+        # ========== ROW 0: Search Label ==========
+        Label(
+            self.current_frame, 
+            text="Search Components",
+            font=("Arial", 16)
+        ).grid(row=0, column=0, columnspan=2, pady=(0, 10), sticky="w")
 
-        Label(self.current_frame, text="Search Components", font=("Arial", 16)).grid(row=0, column=0, columnspan=2, pady=20, sticky="w")
+        # ========== ROW 1: Search Entry ==========
 
-        # Search bar
-        Label(self.current_frame, text="Search:").grid(row=1, column=0, padx=10, pady=5, sticky= "w")
-        search_entry = Entry(self.current_frame, width=80)
-        search_entry.grid(row=2, column=0, padx=10, pady=5, sticky="ew", columnspan=3)
+        search_entry = Entry(self.current_frame, width=80, font=("Arial", 12))
+        search_entry.grid(row=1, column=0, columnspan=2, pady=(0, 15), sticky="ew")
 
-        self.details_frame = Frame(self.current_frame, bd=2, relief="groove", padx=10, pady=20)
-        self.details_frame.grid(row=0, column=3, columnspan=2, rowspan=5, sticky="nsew", padx=10)
-        self.details_label = Label(self.details_frame, text="Component Details will appear here", justify="left")
-        self.details_label.pack(fill="both", expand=True)
+        # ========== ROW 2: Details Section ==========
+        
+        # Left Column: Part Info and Metadata (stacked vertically)
+        left_column = Frame(self.current_frame)
+        left_column.grid(row=2, column=0, sticky="nsew", padx=(0, 10))
+        
+        # Configure left column - 2 rows for Part Info and Metadata
+        left_column.grid_rowconfigure(0, weight=1)  # Part Info section
+        left_column.grid_rowconfigure(1, weight=1)  # Metadata section  
+        left_column.grid_columnconfigure(0, weight=1)
 
-        # Table of components
-        search_tree = Treeview(self.current_frame, columns=("Part Number", "Manufacturer Number", "Location", "Count", "Type"), show="headings")
-        for col in search_tree["columns"]:
-            search_tree.heading(col, text=col)
-            search_tree.column(col, anchor="w")
-        search_tree.grid(row=6, column=0, columnspan=5, sticky="nsew", padx=10, pady=10)
+        # Part Info Section
+        part_info_frame = Frame(left_column, bd=2, relief="groove", padx=10, pady=10)
+        part_info_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
+        part_info_frame.grid_rowconfigure(1, weight=1)
+        part_info_frame.grid_columnconfigure(0, weight=1)
+        
+        Label(
+            part_info_frame, 
+            text="Part Info", 
+            font=("Arial", 12, "bold"), 
+            bg="lightgrey"
+        ).grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        
+        self.part_info_content = Frame(part_info_frame)
+        self.part_info_content.grid(row=1, column=0, sticky="nsew")
 
+        # Metadata Section  
+        metadata_frame = Frame(left_column, bd=2, relief="groove", padx=10, pady=10)
+        metadata_frame.grid(row=1, column=0, sticky="nsew", pady=0 )
+        metadata_frame.grid_rowconfigure(1, weight=1)
+        metadata_frame.grid_columnconfigure(0, weight=1)
+        
+        Label(
+            metadata_frame, 
+            text="Metadata", 
+            font=("Arial", 12, "bold"), 
+            bg="lightgrey"
+        ).grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        
+        self.metadata_content = Frame(metadata_frame)
+        self.metadata_content.grid(row=1, column=0, sticky="nsew")
+
+        # Right Column: Image Section
+        image_frame = Frame(self.current_frame, bd=2, relief="groove", padx=10, pady=10)
+        image_frame.grid(row=2, column=1, sticky="nsew", padx=(0, 10))
+        image_frame.grid_rowconfigure(1, weight=1)
+        image_frame.grid_columnconfigure(0, weight=1)
+        
+        Label(
+            image_frame, 
+            text="Image", 
+            font=("Arial", 12, "bold"), 
+            bg="lightgrey"
+        ).grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        
+        self.image_content = Frame(image_frame)
+        self.image_content.grid(row=1, column=0, sticky="nsew")
+
+        # Default content for empty state
+        Label(
+            self.part_info_content, 
+            text="Select Component to view part information.",
+            justify="center",
+            fg="gray"
+        ).pack(expand=True)
+        
+        Label(
+            self.metadata_content, 
+            text="Select Component to view metadata.",
+            justify="center",
+            fg="gray"
+        ).pack(expand=True)
+        
+        Label(
+            self.image_content, 
+            text="Select Component to view image.",
+            justify="center",
+            fg="gray"
+        ).pack(expand=True)
+
+        # ========== ROW 3: Component Table ==========
+        
+        # Table container
+        table_container = Frame(self.current_frame)
+        table_container.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=0, pady=(15, 0))
+        
+        # Configure table container internal grid
+        table_container.grid_rowconfigure(0, weight=1)
+        table_container.grid_columnconfigure(0, weight=1)
+
+        # Column options for the table
+        columns_options = {
+            "Part Number": {"width": 150, "anchor": "w"},
+            "Manufacturer Number": {"width": 150, "anchor": "w"},
+            "Location": {"width": 80, "anchor": "center"},
+            "Count": {"width": 80, "anchor": "center"},
+            "Type": {"width": 200, "anchor": "w"}
+        }
+
+        # Create the treeview
+        self.search_tree = Treeview(
+            table_container,
+            columns=list(columns_options.keys()),
+            show="headings",
+            height=10
+        )
+
+        # Configure columns
+        for col in columns_options:
+            self.search_tree.heading(col, text=col)
+            self.search_tree.column(col, **columns_options[col])
+
+        # Add scrollbar for table
+        table_scrollbar = Scrollbar(table_container, orient="vertical", command=self.search_tree.yview)
+        self.search_tree.configure(yscrollcommand=table_scrollbar.set)
+        
+        # Place treeview and scrollbar in container
+        self.search_tree.grid(row=0, column=0, sticky="nsew")
+        table_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        # ========== SEARCH FUNCTIONALITY ==========
+        
+        # Create search state storage
+        self.search_results = []
+        self.current_selection = 0
+        
         def update_search_results(event):
             query = search_entry.get().strip()
-            components = self.backend.search_components(query)
-            for row in search_tree.get_children():
-                search_tree.delete(row)
-            for comp in components:
-                search_tree.insert("", "end", values=(comp["part_info"]["part_number"], comp["part_info"]["manufacturer_number"], comp["part_info"]["location"], comp["part_info"]["count"], comp["part_info"]["type"]))
+            self.search_results = self.backend.search_components(query)
+            
+            # Update the table
+            for row in self.search_tree.get_children():
+                self.search_tree.delete(row)
+            for comp in self.search_results:
+                self.search_tree.insert("", "end", values=(
+                    comp["part_info"]["part_number"],
+                    comp["part_info"]["manufacturer_number"],
+                    comp["part_info"]["location"],
+                    comp["part_info"]["count"],
+                    comp["part_info"]["type"]
+                ))
+            
+            # Display search results count
+            if hasattr(self, 'results_label') and self.results_label:
+                self.results_label.destroy()
+                
+            results_text = f"Found {len(self.search_results)} components"
+            if query:
+                results_text += f" matching '{query}'"
+                
+            self.results_label = Label(
+                self.current_frame, 
+                text=results_text,
+                font=("Arial", 10),
+                fg="blue"
+            )
+            self.results_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(25, 0))
+            
+            # Auto-select first result if available
+            if self.search_results:
+                # Select first item in table
+                first_item = self.search_tree.get_children()[0]
+                self.search_tree.selection_set(first_item)
+                self.search_tree.focus(first_item)
+                self.show_component_details_from_table()
+            else:
+                self.clear_component_details()
 
+        # Bind events
         search_entry.bind("<KeyRelease>", update_search_results)
+        
+        # Bind table selection to update details
+        self.search_tree.bind("<<TreeviewSelect>>", lambda event: self.show_component_details_from_table())
+        self.search_tree.bind("<Double-Button-1>", lambda event: self.edit_component(self.search_tree))
+        self.search_tree.bind("<Delete>", lambda event: self.delete_component(self.search_tree))
+        
+        # Focus on search entry
+        search_entry.focus_set()
 
-        search_tree.bind("<Double-Button-1>", lambda event: self.edit_component(search_tree))
-        search_tree.bind("<<TreeviewSelect>>", lambda event: self.show_component_details(event))
-
-        # Populate table initially with all components
+        # Initial population
         update_search_results(None)
 
-        # Bind delete key
-        search_tree.bind("<Delete>", lambda event: self.delete_component(search_tree))
+
+    def show_component_details_from_table(self):
+        """Show component details when table selection changes"""
+        selected = self.search_tree.selection()
+        if not selected:
+            self.clear_component_details()
+            return
+
+        item = self.search_tree.item(selected[0], "values")
+        part_number = item[0]
+
+        # Find the component in the backend
+        component = next((comp for comp in self.backend.get_all_components()
+                        if comp["part_info"]["part_number"].strip().lower() == part_number.strip().lower()), None)
+        
+        if not component:
+            return
+
+        # Handle LED highlighting
+        new_location = component["part_info"].get("location", "").strip()
+        if hasattr(self, 'last_highlighted_location') and self.last_highlighted_location and self.last_highlighted_location != new_location:
+            self.ledControl.turn_off_led(self.last_highlighted_location)
+
+        if new_location:
+            self.ledControl.set_led_on(new_location, 0, 255, 0)
+            self.last_highlighted_location = new_location
+
+        # Clear previous content
+        for widget in self.part_info_content.winfo_children():
+            widget.destroy()
+        for widget in self.metadata_content.winfo_children():
+            widget.destroy()
+        for widget in self.image_content.winfo_children():
+            widget.destroy()
+
+        # Populate Part Info
+        row_idx = 0
+        for key, value in component["part_info"].items():
+            field_frame = Frame(self.part_info_content)
+            field_frame.grid(row=row_idx, column=0, sticky="ew", pady=1)
+            field_frame.grid_columnconfigure(1, weight=1)
+            
+            Label(
+                field_frame,
+                text=f"{key.replace('_', ' ').title()}:",
+                anchor="w",
+                font=("Arial", 9, "bold")
+            ).grid(row=0, column=0, sticky="nw", padx=(0, 5))
+            
+            Label(
+                field_frame,
+                text=f"{value}",
+                anchor="w",
+                wraplength=200,
+                justify="left"
+            ).grid(row=0, column=1, sticky="ew")
+            row_idx += 1
+
+        # Populate Metadata
+        metadata_fields = ["price", "low_stock", "description", "in_use"]
+        row_idx = 0
+        for key in metadata_fields:
+            value = component["metadata"].get(key, "N/A")
+            
+            field_frame = Frame(self.metadata_content)
+            field_frame.grid(row=row_idx, column=0, sticky="ew", pady=1)
+            field_frame.grid_columnconfigure(1, weight=1)
+            
+            Label(
+                field_frame,
+                text=f"{key.replace('_', ' ').title()}:",
+                anchor="w",
+                font=("Arial", 9, "bold")
+            ).grid(row=0, column=0, sticky="nw", padx=(0, 5))
+            
+            if key == "description":
+                value_label = Label(
+                    field_frame,
+                    text=str(value),
+                    anchor="w",
+                    wraplength=200,
+                    justify="left"
+                )
+            else:
+                value_label = Label(
+                    field_frame,
+                    text=str(value),
+                    anchor="w"
+                )
+            
+            value_label.grid(row=0, column=1, sticky="ew")
+            row_idx += 1
+
+        # Load and display image
+        self.load_component_image_new(component)
+
+        # Add action buttons
+        self.create_action_buttons(component)
+
+
+    def load_component_image_new(self, component):
+        """Load and display component image in the new layout"""
+        # Create fixed-size container for image
+        image_container = Frame(self.image_content, width=200, height=200, bg="white")
+        image_container.pack(expand=True, fill="both", padx=10, pady=10)
+        image_container.pack_propagate(False)
+
+        try:
+            image_entry = self.digikeyAPI.fetch_image_data(
+                photo_url=component.get("metadata", {}).get("photo_url", ""),
+                part_number=component.get("part_info", {}).get("part_number", "")
+            )
+            if image_entry and image_entry.image:
+                pil_image = Image.open(BytesIO(image_entry.image))
+                pil_image.thumbnail((180, 180), Image.Resampling.LANCZOS)
+                tk_image = ImageTk.PhotoImage(pil_image)
+                
+                image_label = Label(image_container, image=tk_image)
+                image_label.image = tk_image
+                image_label.pack(expand=True)
+            else:
+                Label(
+                    image_container, 
+                    text="No Image\nAvailable", 
+                    justify="center", 
+                    font=("Arial", 12)
+                ).pack(expand=True)
+        except Exception as e:
+            Label(
+                image_container, 
+                text=f"Image Error:\n{str(e)[:50]}...", 
+                justify="center", 
+                font=("Arial", 8), 
+                fg="red"
+            ).pack(expand=True)
+
+
+    def create_action_buttons(self, component):
+        """Create action buttons for the selected component"""
+        # Remove existing button frame
+        if hasattr(self, 'action_button_frame') and self.action_button_frame:
+            self.action_button_frame.destroy()
+
+        # Create new button frame
+        self.action_button_frame = Frame(self.current_frame)
+        self.action_button_frame.grid(row=4, column=0, columnspan=2, pady=10)
+        
+        Button(
+            self.action_button_frame, 
+            text="Edit Component", 
+            command=lambda: self.edit_component(self.search_tree)
+        ).pack(side="left", padx=5)
+        
+        Button(
+            self.action_button_frame, 
+            text="Checkout", 
+            command=lambda: self.checkout_component(self.search_tree)
+        ).pack(side="left", padx=5)
+        
+        highlight_state = {"on": False}
+        def toggle_highlight():
+            location = component["part_info"]["location"]
+            if not highlight_state["on"]:
+                self.ledControl.set_led_on(location, 0, 255, 0)
+                highlight_btn.config(text="Turn Off", relief='sunken')
+                highlight_state["on"] = True
+            else:
+                self.ledControl.turn_off_led(location)
+                highlight_btn.config(text="Highlight", relief='raised')
+                highlight_state["on"] = False
+
+        highlight_btn = Button(self.action_button_frame, text="Highlight", command=toggle_highlight)
+        highlight_btn.pack(side="left", padx=5)
+
+
+    def clear_component_details(self):
+        """Clear all component details and show default state"""
+        for widget in self.part_info_content.winfo_children():
+            widget.destroy()
+        for widget in self.metadata_content.winfo_children():
+            widget.destroy()
+        for widget in self.image_content.winfo_children():
+            widget.destroy()
+            
+        Label(
+            self.part_info_content, 
+            text="No components found", 
+            justify="center", 
+            fg="gray"
+        ).pack(expand=True)
+        
+        Label(
+            self.metadata_content, 
+            text="No components found", 
+            justify="center", 
+            fg="gray"
+        ).pack(expand=True)
+        
+        Label(
+            self.image_content, 
+            text="No components found", 
+            justify="center", 
+            fg="gray"
+        ).pack(expand=True)
+
+        # Clear button frame
+        if hasattr(self, 'action_button_frame') and self.action_button_frame:
+            self.action_button_frame.destroy()
+            self.action_button_frame = None
 
     def show_add(self):
         self.clear_frame()
@@ -273,10 +666,18 @@ class Frontend:
         Label(self.current_frame, text="Type of Component:").grid(row=4, column=0, padx=5, pady=5, sticky="w")
         Combobox(self.current_frame, textvariable=component_type_var, values=component_types, width=12).grid(row=4, column=1, padx=5, pady=5, sticky="w")
 
+        # details frame
         self.details_frame = Frame(self.current_frame, bd=2, relief="groove", padx=10, pady=20)
         self.details_frame.grid(row=0, column=4, columnspan=2, rowspan=6, sticky="nsew", padx=10)
         self.details_label = Label(self.details_frame, text="Component Details will appear here", justify="left")
         self.details_label.pack(fill="both", expand=True)
+
+        self.details_frame.grid_rowconfigure(0, weight=1)      # Content row expands
+        self.details_frame.grid_rowconfigure(1, weight=0)      # Button row stays fixed
+        self.details_frame.grid_columnconfigure(0, weight=1)   # Part info column
+        self.details_frame.grid_columnconfigure(1, weight=1)   # Metadata column  
+        self.details_frame.grid_columnconfigure(2, weight=1)   # Image column
+
 
         def add_component():
             component_data = {key: entry_widget.get().strip() for key, (_, entry_widget) in fields.items()}
@@ -639,76 +1040,175 @@ class Frontend:
         # Create three subframes: Part Info, Metadata, Image
         part_info_frame = Frame(self.details_frame, bd=1, relief="solid", padx=5, pady=5, width=250)
         part_info_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+
         meta_frame = Frame(self.details_frame, bd=1, relief="solid", padx=5, pady=5, width=250)
         meta_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+
         image_frame = Frame(self.details_frame, bd=1, relief="solid", padx=5, pady=5, width=250)
         image_frame.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
 
-        self.details_frame.columnconfigure(0, weight=1, minsize=250)
-        self.details_frame.columnconfigure(1, weight=1, minsize=250)
-        self.details_frame.columnconfigure(2, weight=1, minsize=250)
+        for frame in [ part_info_frame, meta_frame, image_frame ]:
+            frame.grid_rowconfigure(1, weight=1)
+            frame.grid_columnconfigure(0, weight=1)
+
         #meta_frame.grid_propagate(False)
         #part_info_frame.grid_propagate(False)
 
         # Headers
-        Label(part_info_frame, text="Part Info", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=0)
-        Label(meta_frame, text="Meta Data", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=0)
-        Label(image_frame, text="Image", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=0)
+        Label(
+            part_info_frame, text="Part Info", font=("Arial", 12, "bold"), bg="lightgrey"
+        ).grid( row=0, column=0, columnspan=2, pady=(0,5), sticky="ew")
+        Label(
+            meta_frame, text="Meta Data", font=("Arial", 12, "bold"), bg="lightgrey"
+        ).grid( row=0, column=0, columnspan=2, pady=0 )
+        Label(
+            image_frame, text="Image", font=("Arial", 12, "bold"), bg="lightgrey"
+        ).grid( row=0, column=0, columnspan=2, pady=0 )
+
+        # scrollable content
+        part_content = Frame(part_info_frame)
+        part_content.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=2, pady=2)
+
+        meta_content = Frame(meta_frame)
+        meta_content.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=2, pady=2)
 
         # Populate Part Info (each key-value pair on its own row)
-        row_idx = 1
+        # create new container per field for better auto-scaling
+        """
+        ┌─────────────────────────────────────┐
+        │ part_content (parent container)     │
+        │                                     │
+        │ ┌─────────────────────────────────┐ │ ← field_frame for part_number
+        │ │ Part Number:    │ 497-2944-5-ND │ │
+        │ └─────────────────────────────────┘ │
+        │                                     │
+        │ ┌─────────────────────────────────┐ │ ← field_frame for manufacturer_number  
+        │ │ Manufacturer:   │ L6234PD       │ │
+        │ └─────────────────────────────────┘ │
+        │                                     │
+        │ ┌─────────────────────────────────┐ │ ← field_frame for location
+        │ │ Location:       │ 1I            │ │
+        │ └─────────────────────────────────┘ │
+        │                                     │
+        │ ... and so on for each field       │
+        └─────────────────────────────────────┘
+        """
+        row_idx = 1 # header is row 0
         for key, value in component["part_info"].items():
-            Label(part_info_frame, text=f"{key}:", anchor="w").grid(row=row_idx, column=0, sticky="w", padx=2, pady=2)
-            Label(part_info_frame, text=f"{value}", anchor="w").grid(row=row_idx, column=0, sticky="w", padx=(100,2), pady=2)
+            field_frame = Frame(part_content)
+            field_frame.grid(row=row_idx, column=0, sticky="ew", pady=1)
+            field_frame.grid_columnconfigure(1, weight=1)
+            # create the Label
+            Label(
+                    field_frame, text=f"{key.replace('_', ' ').title()}:", anchor="w", font=("Arial", 9, "bold")
+            ).grid( row=0, column=0, sticky="nw", padx=(0,5))
+            Label(
+                    field_frame, text=f"{value}", anchor="w", wraplength=140, justify="left"
+            ).grid( row=0, column=1, sticky="ew")
             row_idx += 1
 
         # Populate Meta Data similarly
-        Label(meta_frame, text=f"Price:", anchor="w").grid(row=1, column=1, sticky="w", padx=2, pady=2)
-        Label(meta_frame, text=component["metadata"]["price"], anchor="w").grid(row=1, column=1, sticky="w", padx=(100,2), pady=2)
-        Label(meta_frame, text=f"Low Stock:", anchor="w").grid(row=2, column=1, sticky="w", padx=2, pady=2)
-        Label(meta_frame, text=component["metadata"]["low_stock"], anchor="w").grid(row=2, column=1, sticky="w", padx=(100,2), pady=2)
-        Label(meta_frame, text=f"Description:", anchor="w").grid(row=3, column=1, sticky="w", padx=2, pady=2)
-        Label(meta_frame, text=component["metadata"]["description"], anchor="w").grid(row=3, column=1, sticky="w", padx=(100,2), pady=2)
-        Label(meta_frame, text=f"In Use?:", anchor="w").grid(row=4, column=1, sticky="w", padx=2, pady=2)
-        Label(meta_frame, text=component["metadata"]["in_use"], anchor="w").grid(row=4, column=1, sticky="w", padx=(100,2), pady=2)
+        meta_fields = ["price", "low_stock", "description", "in_use" ]
+        row_idx = 0
+        for key in meta_fields:
+            value = component.get("metadata", {}).get(key, "N/A")
 
-        # Fetch Image
-        image_entry = self.digikeyAPI.fetch_image_data(
-            photo_url=component.get("metadata", {}).get("photo_url", ""),
-            part_number=component.get("part_info", {}).get("part_number", "")
-        )
-        if image_entry:
-            pil_image = Image.open(BytesIO(image_entry.image))
-            pil_image.thumbnail((200,200))
+            field_frame = Frame(meta_content)
+            field_frame.grid(row=row_idx, column=0, sticky="ew", pady=1)
+            field_frame.grid_columnconfigure(1, weight=1)
 
-            tk_image = ImageTk.PhotoImage(pil_image)
+            Label(field_frame, text=f"{key.replace('_', ' ').title()}:", anchor="w", font=("Arial", 9, "bold")
+            ).grid( row=0, column=0, sticky="nw", padx=(0,5) )
+            
+            # create text wrapping for description
+            if key == "description":
+                value_label = Label( field_frame, text=str(value), anchor="w", wraplength=120, justify="left" )
+            else:
+                value_label = Label( field_frame, text=str(value), anchor="w" )
 
-            image_label = Label(image_frame, image=tk_image)
-            image_label.image = tk_image
-            image_label.grid(row=0, column=0, padx=5, pady=5)
-        else:
-            Label(image_frame, text="No Image Available").grid(row=0, column=0, padx=5, pady=5)
+            value_label.grid( row=0, column=1, sticky="ew" )
+            row_idx += 1
 
-        highlight_state = {"on": False}  # Track whether the LED is currently highlighted.
 
-        highlight_color = (0, 255, 0)
+        # Label(meta_frame, text=f"Price:", anchor="w").grid(row=1, column=1, sticky="w", padx=2, pady=2)
+        # Label(meta_frame, text=component["metadata"]["price"], anchor="w").grid(row=1, column=1, sticky="w", padx=(100,2), pady=2)
+        # Label(meta_frame, text=f"Low Stock:", anchor="w").grid(row=2, column=1, sticky="w", padx=2, pady=2)
+        # Label(meta_frame, text=component["metadata"]["low_stock"], anchor="w").grid(row=2, column=1, sticky="w", padx=(100,2), pady=2)
+        # Label(meta_frame, text=f"Description:", anchor="w").grid(row=3, column=1, sticky="w", padx=2, pady=2)
+        # Label(meta_frame, text=component["metadata"]["description"], anchor="w").grid(row=3, column=1, sticky="w", padx=(100,2), pady=2)
+        # Label(meta_frame, text=f"In Use?:", anchor="w").grid(row=4, column=1, sticky="w", padx=2, pady=2)
+        # Label(meta_frame, text=component["metadata"]["in_use"], anchor="w").grid(row=4, column=1, sticky="w", padx=(100,2), pady=2)
 
-        highlight_button = Button(self.details_frame, text="Highlight")
-        highlight_button.grid(row=6, column=0, columnspan=2, pady=10, sticky="e")
+        # Create image container
+        image_container = Frame ( image_frame, width=200, height=200, bg="white" )
+        image_container.grid( row=1, column=0, columnspan=2, padx=5, pady=5 )
+        image_container.grid_propagate( False )
+        image_container.grid_rowconfigure( 0, weight=1 )     # weight 1 so it centers
+        image_container.grid_columnconfigure( 0, weight=1 )  # ^
+        try:
+            image_entry = self.digikeyAPI.fetch_image_data(
+                photo_url=component.get("metadata", {}).get("photo_url", ""),
+                part_number=component.get("part_info", {}).get("part_number", "")
+            )
+            if image_entry and image_entry.image:
+                pil_image = Image.open( BytesIO( image_entry.image ) )
+                pil_image.thumbnail( (180,180) ) # slightly smaller than the frame
+                tk_image = ImageTk.PhotoImage( pil_image )
+
+                image_label = Label( image_frame, image=tk_image )
+                image_label.image = tk_image # no garbage collection
+                image_label.grid( row=0, column=0 )
+            else:
+                  Label( 
+                      image_container, text=f"No Image\nAvailable", justify="center", font=("Arial", 10)
+                  ).grid( row=0, column=0 )
+        except Exception as e:
+                  Label( 
+                      image_container, text=f"Image Error:\n{str(e)}...", justify="center", font=("Arial", 10), fg="red"
+                  ).grid( row=0, column=0 )
+
+        # create button panel
+        button_frame = Frame( self.details_frame )
+        button_frame.grid( row=1, column=0, columnspan=3, sticky="ew", padx=2, pady=5 )
+
+        button_frame.grid_columnconfigure( 0, weight=1 )
+        button_frame.grid_columnconfigure( 1, weight=1 )
+        button_frame.grid_columnconfigure( 2, weight=1 )
+
+        highlight_state = { "on": False }   # Track whether the LED is currently highlighted.
+
+        highlight_color = ( 0, 255, 0 )
 
         def toggle_highlight():
             if not highlight_state["on"]:
                 self.ledControl.set_led_on(component["part_info"]["location"], *highlight_color)
-                highlight_button.config(text="Highlight", relief='sunken')
+                highlight_button.config(text="Turn Off", relief='sunken')
                 highlight_state["on"] = True
             else:
                 self.ledControl.turn_off_led(component["part_info"]["location"])
                 highlight_button.config(text="Highlight", relief='raised')
                 highlight_state["on"] = False
 
-        highlight_button.config(command=toggle_highlight)
-        Button(self.details_frame, text="Checkout", command=lambda: self.checkout_component(tree)).grid(row=6, column=0, columnspan=2, pady=10)
-        Button(self.details_frame, text="Edit Component", command=lambda: self.edit_component(tree)).grid(row=6, column=0, columnspan=2, pady=10, sticky="w")
+        highlight_button = Button( 
+            self.details_frame, 
+            text="Highlight", 
+            command=toggle_highlight 
+        )
+        highlight_button.grid( row=6, column=0, pady=2, padx=5, sticky="ew" )
+
+        checkout_button = Button(
+            self.details_frame, 
+            text="Checkout", 
+            command=lambda: self.checkout_component(tree)
+        )
+        checkout_button.grid( row=6, column=1, pady=2, padx=5, sticky="ew" )
+
+        edit_button = Button( 
+            self.details_frame, 
+            text="Edit Component", 
+            command=lambda: self.edit_component(tree)
+        )
+        edit_button.grid( row=6, column=2, pady=2, padx=5, sticky="ew" )
 
     def edit_component(self, tree):
         selected_item = tree.selection()
