@@ -1,7 +1,6 @@
 /Databases/
 /archived_code/
 /backups/
-*.md
 *.pyc
 *.xls
 *.xlsx
