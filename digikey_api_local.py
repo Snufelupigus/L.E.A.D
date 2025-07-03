@@ -1,21 +1,20 @@
 from image_cache import ImageCacheEntry
 from datetime import datetime, timezone
-from PIL import Image
-from io import BytesIO
 import requests
 import logging
 logging.basicConfig(level=logging.DEBUG)
 import json
 import os
 import time
-from tkinter import messagebox
-
+from tkinter import messagebox, simpledialog
+import webbrowser
 
 
 class Digikey_API_Call:
     ACCESS_TOKEN: str
     def __init__(self):
         self.config_file = os.path.join(os.path.dirname(__file__), "Databases", "config.json")
+        self.refresh_token_file = os.path.join(os.path.dirname(__file__), "Databases", "REFRESH_TOKEN")
         self.load_config()
 
     def load_config(self):
@@ -38,6 +37,46 @@ class Digikey_API_Call:
             self.CLIENT_ID = None
             self.CLIENT_SECRET = None
 
+        if os.path.isfile(self.refresh_token_file):
+            with open(self.refresh_token_file) as textFile:
+                self.REFRESH_TOKEN = textFile.read()
+        else:
+            self.get_refresh_token()
+
+
+    def get_refresh_token(self):
+
+        webbrowser.open("https://api.digikey.com/v1/oauth2/authorize?response_type=code&" \
+        "client_id=%s&redirect_uri=https://localhost" % (self.CLIENT_ID))
+
+        code = simpledialog.askstring("Enter Code", "Please enter code")
+
+        print(code)
+
+        digiKeyAuth = {
+            'code' : code,
+            'client_id': self.CLIENT_ID ,
+            'client_secret': self.CLIENT_SECRET,
+            'redirect_uri' : "https://localhost",
+            'grant_type':'authorization_code'
+        }
+        
+        try:
+            refreshToken = requests.post("https://api.digikey.com/v1/oauth2/token", data=digiKeyAuth)
+            refreshToken.raise_for_status()
+        except requests.exceptions.HTTPError as http_error:
+            messagebox.showerror("Bad Code", "Code entered is not vaild.")
+            return None
+        
+        self.ACCESS_TOKEN = refreshToken.json()["access_token"]
+        self.TOKEN_EXPIRES = time.time() + refreshToken.json()["expires_in"]
+        self.REFRESH_TOKEN = refreshToken.json()["refresh_token"]
+
+        with open(self.refresh_token_file, "w") as textFile:
+            textFile.write(self.REFRESH_TOKEN)
+
+
+
     def refresh_access_token(self):
         #Check if we have a client id and secret.
         if not self.CLIENT_ID or not self.CLIENT_SECRET:
@@ -48,7 +87,8 @@ class Digikey_API_Call:
         digiKeyAuth = {
             'client_id': self.CLIENT_ID ,
             'client_secret': self.CLIENT_SECRET,
-            'grant_type':'client_credentials'
+            'refresh_token': self.REFRESH_TOKEN,
+            'grant_type':'refresh_token'
         }
         
         try:
@@ -62,6 +102,10 @@ class Digikey_API_Call:
 
         self.ACCESS_TOKEN = tokenRequest.json()["access_token"]
         self.TOKEN_EXPIRES = time.time() + tokenRequest.json()["expires_in"]
+        self.REFRESH_TOKEN = tokenRequest.json()["refresh_token"]
+
+        with open(self.refresh_token_file, "w") as textFile:
+            textFile.write(self.REFRESH_TOKEN)
 
     @staticmethod
     def _handle_digikey_error(http_error):
@@ -148,7 +192,7 @@ class Digikey_API_Call:
                 dk_part_number=digikey_part_number,
                 image=imageData.content,
                 etag=response.headers.get('ETag'), #What is this, i've only ever seen it return 
-                fetched_at=datetime.now(datetime.timezone.utc).timestamp()
+                fetched_at=datetime.now(timezone.utc).timestamp()
             )
         
         except requests.exceptions.HTTPError as http_error:
