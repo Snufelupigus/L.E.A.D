@@ -1,22 +1,25 @@
-from image_cache import ImageCacheEntry, Image_Cache
+from image_cache import ImageCacheEntry
 from datetime import datetime, timezone
-from PIL import Image
-from io import BytesIO
 import requests
 import logging
 logging.basicConfig(level=logging.DEBUG)
 import json
 import os
 import time
-from tkinter import messagebox
+from tkinter import messagebox, simpledialog
+from dataclasses import dataclass
+import webbrowser
 
-
+@dataclass
+class DigiKeyPackItem:
+    DigiKeyPartNumber: str
+    Quantity: int
 
 class Digikey_API_Call:
     ACCESS_TOKEN: str
     def __init__(self):
         self.config_file = os.path.join(os.path.dirname(__file__), "Databases", "config.json")
-        self.image_cache = Image_Cache()
+        self.refresh_token_file = os.path.join(os.path.dirname(__file__), "Databases", "REFRESH_TOKEN")
         self.load_config()
 
     def load_config(self):
@@ -39,6 +42,46 @@ class Digikey_API_Call:
             self.CLIENT_ID = None
             self.CLIENT_SECRET = None
 
+        if os.path.isfile(self.refresh_token_file):
+            with open(self.refresh_token_file) as textFile:
+                self.REFRESH_TOKEN = textFile.read()
+        else:
+            self.get_refresh_token()
+
+
+    def get_refresh_token(self):
+
+        webbrowser.open("https://api.digikey.com/v1/oauth2/authorize?response_type=code&" \
+        "client_id=%s&redirect_uri=https://localhost" % (self.CLIENT_ID))
+
+        code = simpledialog.askstring("Enter Code", "Please enter code")
+
+        print(code)
+
+        digiKeyAuth = {
+            'code' : code,
+            'client_id': self.CLIENT_ID ,
+            'client_secret': self.CLIENT_SECRET,
+            'redirect_uri' : "https://localhost",
+            'grant_type':'authorization_code'
+        }
+        
+        try:
+            refreshToken = requests.post("https://api.digikey.com/v1/oauth2/token", data=digiKeyAuth)
+            refreshToken.raise_for_status()
+        except requests.exceptions.HTTPError as http_error:
+            messagebox.showerror("Bad Code", "Code entered is not vaild.")
+            return None
+        
+        self.ACCESS_TOKEN = refreshToken.json()["access_token"]
+        self.TOKEN_EXPIRES = time.time() + refreshToken.json()["expires_in"]
+        self.REFRESH_TOKEN = refreshToken.json()["refresh_token"]
+
+        with open(self.refresh_token_file, "w") as textFile:
+            textFile.write(self.REFRESH_TOKEN)
+
+
+
     def refresh_access_token(self):
         #Check if we have a client id and secret.
         if not self.CLIENT_ID or not self.CLIENT_SECRET:
@@ -49,7 +92,8 @@ class Digikey_API_Call:
         digiKeyAuth = {
             'client_id': self.CLIENT_ID ,
             'client_secret': self.CLIENT_SECRET,
-            'grant_type':'client_credentials'
+            'refresh_token': self.REFRESH_TOKEN,
+            'grant_type':'refresh_token'
         }
         
         try:
@@ -63,6 +107,10 @@ class Digikey_API_Call:
 
         self.ACCESS_TOKEN = tokenRequest.json()["access_token"]
         self.TOKEN_EXPIRES = time.time() + tokenRequest.json()["expires_in"]
+        self.REFRESH_TOKEN = tokenRequest.json()["refresh_token"]
+
+        with open(self.refresh_token_file, "w") as textFile:
+            textFile.write(self.REFRESH_TOKEN)
 
     @staticmethod
     def _handle_digikey_error(http_error):
@@ -97,40 +145,67 @@ class Digikey_API_Call:
         messagebox.showerror("Failed to Fetch Image", f"{msg}.\nHTTP ERROR: {code}")
         return None
 
-    def fetch_image_data(self, photo_url: str, part_number: str):
-        cache_entry = self.image_cache.request_entry(part_number=part_number.strip())
-        if cache_entry:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-                "If-None-Match": cache_entry.etag
-            }
-        else:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-            }
+    def fetch_image_data(self, digikey_part_number: str):
+        '''
+        Request the part image from the Digikey api, using the Digikey part number.
+        '''
+        # Yes, we probably could use the photo_url from the metadata (when that gets implemented)
+        # but this returns the most up-to-date image. ()
 
-        response = requests.get(photo_url, headers=headers, timeout=5)
-        if response.status_code == 304: # the etag matches so just return the cached entry
-            return cache_entry
-        elif response.status_code == 200: 
-            if cache_entry: # entry exists but not same etag so update and return
-                cache_entry.image = response.content
-                cache_entry.etag = response.headers.get('ETag')
-                cache_entry.fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                return cache_entry
-            else: # doesnt exist so build entry object and return
-                return ImageCacheEntry(
-                    dk_part_number=part_number,
-                    image=response.content,
-                    etag=response.headers.get('ETag'),
-                    fetched_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                )
-        # TODO:tariq handle httperror while requesting
-        else:
-            return cache_entry if cache_entry else self._show_error_and_return_none("Failed to load image.", 
-                                                                                    response.status_code)
+        if not self.ACCESS_TOKEN or time.time() > self.TOKEN_EXPIRES:
+            self.refresh_access_token()
+        
+
+        defaultHeaders = {
+            'Authorization': 'Bearer ' + self.ACCESS_TOKEN,
+            'X-DIGIKEY-Client-Id': self.CLIENT_ID,
+            'Content-Type': 'application/json',
+            'X-DIGIKEY-Locale-Site': 'US', 
+            'X-DIGIKEY-Locale-Language': 'en', 
+            'X-DIGIKEY-Locale-Currency': 'USD'
+        }
+        
+        
+        try:
+            response = requests.get("https://api.digikey.com/products/v4/search/%s/media" % (digikey_part_number), headers=defaultHeaders, timeout=5)
+
+            response.raise_for_status()
+
+            # Returns all the media on the product page, including datasheets.
+            mediaLinks = json.loads(response.content)['MediaLinks']
+
+            imageURL = None
+
+            for i in mediaLinks:
+                if i["MediaType"] == "Product Photos":
+                    imageURL = i["Url"]
+                    pass
+
+            # Apparently they only EXCLUDE curl/wget or whatever python uses,
+            # sending NOTHING works fine.
+            imageHeaders = {
+                "User-Agent": ""
+            }
+                
+            if imageURL is not None:
+                imageData = requests.get(imageURL, headers=imageHeaders)
+                # This should probably have it's own try/except, since it's not techincally
+                # part of the Digikey API, so far i've only seen it return 403 on user-agent error though.
+                imageData.raise_for_status()
+            
+            return ImageCacheEntry(
+                dk_part_number=digikey_part_number,
+                image=imageData.content,
+                etag=response.headers.get('ETag'), #What is this, i've only ever seen it return 
+                fetched_at=datetime.now(timezone.utc).timestamp()
+            )
+        
+        except requests.exceptions.HTTPError as http_error:
+            self._handle_digikey_error(http_error)
+
+        except requests.exceptions.RequestException as req_error:
+            messagebox.showerror("Connection Error", f"A network error happened: \n{str(req_error)}")
+        
 
 
     def fetch_part_details(self, part_number: str):
@@ -210,4 +285,40 @@ class Digikey_API_Call:
 
         except requests.exceptions.RequestException as req_error:
             messagebox.showerror("Connection Error", f"A network error happened: \n{str(req_error)}")
+
+
+
+    def get_package_list_from_barcode(self, barcode):
+        
+        if not self.ACCESS_TOKEN or time.time() > self.TOKEN_EXPIRES:
+            self.refresh_access_token()
+
+        defaultHeaders = {
+            'Authorization': 'Bearer ' + self.ACCESS_TOKEN,
+            'X-DIGIKEY-Client-Id': self.CLIENT_ID,
+            'Content-Type': 'application/json',
+            'X-DIGIKEY-Locale-Site': 'US', 
+            'X-DIGIKEY-Locale-Language': 'en', 
+            'X-DIGIKEY-Locale-Currency': 'USD'
+        }
+
+        try:
+            response = requests.get("api.digikey.com/Barcoding/v3/PackListBarcodes/%s" % (barcode), headers=defaultHeaders, timeout=5)
+
+            response.raise_for_status()
+
+            
+
+            partList = tuple(json.loads(response.content["PackListDetails"]))
+
+            return partList
+
+        except requests.exceptions.HTTPError as http_error:
+            self._handle_digikey_error(http_error)
+
+        except requests.exceptions.RequestException as req_error:
+            messagebox.showerror("Connection Error", f"A network error happened: \n{str(req_error)}")
+
+
+
 
