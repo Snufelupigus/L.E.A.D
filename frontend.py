@@ -104,43 +104,52 @@ class Frontend:
 
         # Create new frame with proper configuration
         self.current_frame = Frame(self.root)
-        self.current_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        self.current_frame.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
         
         # Configure the main frame for responsive behavior
-        # self.current_frame.grid_columnconfigure(0, weight=0)  # Labels don't expand
-        # self.current_frame.grid_columnconfigure(1, weight=0)  # Entry fields don't expand  
-        # self.current_frame.grid_columnconfigure(2, weight=0)  # Buttons don't expand
-        # self.current_frame.grid_columnconfigure(3, weight=1)  # Details frame expands
-        # self.current_frame.grid_columnconfigure(4, weight=1)  # Details frame expands
+        self.current_frame.grid_rowconfigure(0, weight=1)
+        self.current_frame.grid_columnconfigure(0, weight=1)
 
 
 
     def show_home(self):
         self.clear_frame()
-        self.current_frame = Frame(self.root)
-        self.current_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Configure grid layout for home page
+        self.current_frame.grid_rowconfigure(0, weight=0)  # Statistics title
+        self.current_frame.grid_rowconfigure(1, weight=0)  # Total parts
+        self.current_frame.grid_rowconfigure(2, weight=0)  # Types of parts
+        self.current_frame.grid_rowconfigure(3, weight=0)  # Build a board title
+        self.current_frame.grid_rowconfigure(4, weight=0)  # BOM buttons
+        self.current_frame.grid_rowconfigure(5, weight=0)  # Low stock title
+        self.current_frame.grid_rowconfigure(6, weight=0)  # Export button
+        self.current_frame.grid_rowconfigure(7, weight=1)  # Low stock table (expandable)
+        self.current_frame.grid_columnconfigure(0, weight=1)
 
         # Display statistics
-        Label(self.current_frame, text="Home - Statistics", font=("Arial", 16)).pack(pady=20)
+        Label(self.current_frame, text="Home - Statistics", font=("Arial", 16)).grid(row=0, column=0, pady=20, sticky="w")
 
         stats = self.backend.get_statistics()
-        Label(self.current_frame, text=f"Total Parts: {stats['total_parts']}").pack(pady=10)
-        Label(self.current_frame, text=f"Types of Parts: {', '.join(stats['types'])}").pack(pady=10)
+        Label(self.current_frame, text=f"Total Parts: {stats['total_parts']}").grid(row=1, column=0, pady=10, sticky="w")
+        Label(self.current_frame, text=f"Types of Parts: {', '.join(stats['types'])}").grid(row=2, column=0, pady=10, sticky="w")
 
-        Label(self.current_frame, text="Build A Board", font=("Arial", 16)).pack(pady=20)
+        Label(self.current_frame, text="Build A Board", font=("Arial", 16)).grid(row=3, column=0, pady=20, sticky="w")
 
+        # BOM buttons frame
         buttons_frame = Frame(self.current_frame)
-        buttons_frame.pack(side=TOP, fill=X, padx=10, pady=5)
+        buttons_frame.grid(row=4, column=0, sticky="ew", padx=10, pady=5)
+        buttons_frame.grid_columnconfigure(0, weight=1)
 
+        # Center buttons within the buttons frame
         center_frame = Frame(buttons_frame)
-        center_frame.pack(expand=True)
+        center_frame.grid(row=0, column=0)
 
-        Button(center_frame, text="Checkout From BOM", command=lambda: self.process_bom_file("out")).pack(side=LEFT, padx=10)
-        Button(center_frame, text="Check In From BOM", command=lambda: self.process_bom_file("in")).pack(side=LEFT, padx=10)
+        Button(center_frame, text="Checkout From BOM", command=lambda: self.process_bom_file("out")).grid(row=0, column=0, padx=10)
+        Button(center_frame, text="Check In From BOM", command=lambda: self.process_bom_file("in")).grid(row=0, column=1, padx=10)
 
-        Label(self.current_frame, text="Low Stock Items", font=("Arial", 16)).pack(pady=20)
+        Label(self.current_frame, text="Low Stock Items", font=("Arial", 16)).grid(row=5, column=0, pady=20, sticky="w")
 
-        Button(self.current_frame, text="Export Low Stock Data", command=self.export_low_stock_data).pack(pady=10)
+        Button(self.current_frame, text="Export Low Stock Data", command=self.export_low_stock_data).grid(row=6, column=0, pady=10, sticky="w")
 
         # Create a Treeview to show low-stock items.
         low_stock_tree = Treeview(self.current_frame, columns=("Digikey", "Count", "LowStock", "ProductURL"), show="headings")
@@ -154,7 +163,7 @@ class Frontend:
         low_stock_tree.column("Count", width=100, anchor="center")
         low_stock_tree.column("LowStock", width=150, anchor="center")
         low_stock_tree.column("ProductURL", width=300, anchor="w")
-        low_stock_tree.pack(fill="both", expand=True, padx=10, pady=10)
+        low_stock_tree.grid(row=7, column=0, sticky="nsew", padx=10, pady=10)
 
         # Get low-stock components from the backend.
         low_stock_components = self.backend.get_low_stock_components()
@@ -187,8 +196,6 @@ class Frontend:
         self.action_button_frame = None
         
         self.clear_frame()
-        self.current_frame = Frame(self.root)
-        self.current_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
         # Configure main grid - 5 rows, 2 columns
         self.current_frame.grid_rowconfigure(0, weight=0) # Search label - fixed
@@ -201,11 +208,17 @@ class Frontend:
         self.current_frame.grid_columnconfigure(1, weight=1) # Right column expands
 
         # ========== ROW 0: Search Label ==========
+        title_container = Frame(self.current_frame, height=40)
+        title_container.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 5))
+        title_container.grid_propagate(False)  # Maintain fixed height
+        title_container.grid_columnconfigure(0, weight=1)
+        title_container.grid_rowconfigure(0, weight=1)
+
         Label(
-            self.current_frame, 
+            title_container, 
             text="Search Components",
             font=("Arial", 16)
-        ).grid(row=0, column=0, columnspan=2, pady=(0, 10), sticky="w")
+        ).grid(row=0, column=0, sticky="w")
 
         # ========== ROW 1: Search Entry ==========
 
@@ -271,27 +284,34 @@ class Frontend:
         self.image_content = Frame(image_frame)
         self.image_content.grid(row=1, column=0, sticky="nsew")
 
-        # Default content for empty state
+        # Default content for empty state - configure containers first
+        self.part_info_content.grid_rowconfigure(0, weight=1)
+        self.part_info_content.grid_columnconfigure(0, weight=1)
+        self.metadata_content.grid_rowconfigure(0, weight=1)
+        self.metadata_content.grid_columnconfigure(0, weight=1)
+        self.image_content.grid_rowconfigure(0, weight=1)
+        self.image_content.grid_columnconfigure(0, weight=1)
+        
         Label(
             self.part_info_content, 
             text="Select Component to view part information.",
             justify="center",
             fg="gray"
-        ).pack(expand=True)
+        ).grid(row=0, column=0)
         
         Label(
             self.metadata_content, 
             text="Select Component to view metadata.",
             justify="center",
             fg="gray"
-        ).pack(expand=True)
+        ).grid(row=0, column=0)
         
         Label(
             self.image_content, 
             text="Select Component to view image.",
             justify="center",
             fg="gray"
-        ).pack(expand=True)
+        ).grid(row=0, column=0)
 
         # ========== ROW 3: Component Table ==========
         
@@ -499,8 +519,10 @@ class Frontend:
         """Load and display component image in the new layout"""
         # Create fixed-size container for image
         image_container = Frame(self.image_content, width=200, height=200, bg="white")
-        image_container.pack(expand=True, fill="both", padx=10, pady=10)
-        image_container.pack_propagate(False)
+        image_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        image_container.grid_propagate(False)
+        image_container.grid_rowconfigure(0, weight=1)
+        image_container.grid_columnconfigure(0, weight=1)
 
         try:
             image_entry = self.digikeyAPI.fetch_image_data(
@@ -514,14 +536,14 @@ class Frontend:
                 
                 image_label = Label(image_container, image=tk_image)
                 image_label.image = tk_image
-                image_label.pack(expand=True)
+                image_label.grid(row=0, column=0)
             else:
                 Label(
                     image_container, 
                     text="No Image\nAvailable", 
                     justify="center", 
                     font=("Arial", 12)
-                ).pack(expand=True)
+                ).grid(row=0, column=0)
         except Exception as e:
             Label(
                 image_container, 
@@ -529,7 +551,7 @@ class Frontend:
                 justify="center", 
                 font=("Arial", 8), 
                 fg="red"
-            ).pack(expand=True)
+            ).grid(row=0, column=0)
 
 
     def create_action_buttons(self, component):
@@ -546,13 +568,13 @@ class Frontend:
             self.action_button_frame, 
             text="Edit Component", 
             command=lambda: self.edit_component(self.search_tree)
-        ).pack(side="left", padx=5)
+        ).grid(row=0, column=0, padx=5)
         
         Button(
             self.action_button_frame, 
             text="Checkout", 
             command=lambda: self.checkout_component(self.search_tree)
-        ).pack(side="left", padx=5)
+        ).grid(row=0, column=1, padx=5)
         
         highlight_state = {"on": False}
         def toggle_highlight():
@@ -567,7 +589,7 @@ class Frontend:
                 highlight_state["on"] = False
 
         highlight_btn = Button(self.action_button_frame, text="Highlight", command=toggle_highlight)
-        highlight_btn.pack(side="left", padx=5)
+        highlight_btn.grid(row=0, column=2, padx=5)
 
 
     def clear_component_details(self):
@@ -584,21 +606,21 @@ class Frontend:
             text="No components found", 
             justify="center", 
             fg="gray"
-        ).pack(expand=True)
+        ).grid(row=0, column=0)
         
         Label(
             self.metadata_content, 
             text="No components found", 
             justify="center", 
             fg="gray"
-        ).pack(expand=True)
+        ).grid(row=0, column=0)
         
         Label(
             self.image_content, 
             text="No components found", 
             justify="center", 
             fg="gray"
-        ).pack(expand=True)
+        ).grid(row=0, column=0)
 
         # Clear button frame
         if hasattr(self, 'action_button_frame') and self.action_button_frame:
@@ -607,8 +629,6 @@ class Frontend:
 
     def show_add(self):
         self.clear_frame()
-        self.current_frame = Frame(self.root)
-        self.current_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         Label(self.current_frame, text="Add New Component", font=("Arial", 16)).grid(row=0, column=0, columnspan=4, pady=20, sticky="w")
 
@@ -670,7 +690,7 @@ class Frontend:
         self.details_frame = Frame(self.current_frame, bd=2, relief="groove", padx=10, pady=20)
         self.details_frame.grid(row=0, column=4, columnspan=2, rowspan=6, sticky="nsew", padx=10)
         self.details_label = Label(self.details_frame, text="Component Details will appear here", justify="left")
-        self.details_label.pack(fill="both", expand=True)
+        self.details_label.grid(row=0, column=0, sticky="nsew")
 
         self.details_frame.grid_rowconfigure(0, weight=1)      # Content row expands
         self.details_frame.grid_rowconfigure(1, weight=0)      # Button row stays fixed
@@ -1012,7 +1032,7 @@ class Frontend:
         if not selected:
             for widget in self.details_frame.winfo_children():
                 widget.destroy()
-            Label(self.details_frame, text="No component selected", justify="left").pack(fill="both", expand=True)
+            Label(self.details_frame, text="No component selected", justify="left").grid(row=0, column=0, sticky="nsew")
             return None
 
         item = tree.item(selected[0], "values")
@@ -1454,7 +1474,10 @@ class Frontend:
                             row.get("location", "N/A")
                         ),
                         tags=tags)
-        tree.pack(fill="both", expand=True, padx=10, pady=10)
+        # Configure preview window grid
+        preview_win.grid_rowconfigure(0, weight=1)
+        preview_win.grid_columnconfigure(0, weight=1)
+        tree.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
         # helper to get location safely
         def get_selected_location():
@@ -1525,7 +1548,11 @@ class Frontend:
             tree.column("Quantity", width=80, anchor="center")
             tree.column("Found", width=80, anchor="center")
             tree.column("Current Count", width=100, anchor="center")
-            tree.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            # Configure preview window grid
+            preview_win.grid_rowconfigure(0, weight=1)
+            preview_win.grid_columnconfigure(0, weight=1)
+            tree.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
             
             for row in bom_list:
                 tree.insert("", "end", values=(
@@ -1593,7 +1620,11 @@ class Frontend:
         result_tree.column("Part", width=150, anchor="w")
         result_tree.column("Remaining", width=100, anchor="center")
         result_tree.column("Status", width=150, anchor="center")
-        result_tree.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Configure result window grid
+        result_win.grid_rowconfigure(0, weight=1)
+        result_win.grid_columnconfigure(0, weight=1)
+        result_tree.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         
         for res in results:
             result_tree.insert("", "end", values=(res["part"], res["remaining"], res["status"]))

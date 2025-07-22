@@ -51,8 +51,6 @@ class Backend:
 
         self.schedule_backup(interval_seconds=600)
 
-    import re
-
     def normalize_part_number(self, part_number):
         part_number = part_number.strip().lower()
         # Match formats like ...TR-ND, ...CT-ND, ...DKR-ND, ...1-ND, etc.
