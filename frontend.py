@@ -8,9 +8,12 @@ import signal
 
 from PIL import Image, ImageTk
 
+from image_cache import ImageCache, ImageCacheEntry
+
 import time
 from io import BytesIO
 import webbrowser
+import threading
 
 class Frontend:
     """
@@ -656,7 +659,7 @@ class Frontend:
             row_idx += 1
 
         # Load and display image
-        self.load_component_image_new(component)
+        self.load_component_image_async(component)
 
         # Add action buttons
         self.create_action_buttons(component)
@@ -687,7 +690,7 @@ class Frontend:
             - Only new/uncached images cause UI blocking
             - Target for threading optimization: wrap network requests only
         """
-        # Create fixed-size container for image
+        # Create container for image
         image_container = Frame(self.image_content, width=200, height=200, bg="white")
         image_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         image_container.grid_propagate(False)
@@ -723,6 +726,111 @@ class Frontend:
                 fg="red"
             ).grid(row=0, column=0)
 
+    def load_component_image_async(self, component) -> None:
+        """
+        Asynchronously load and display component image with instant cache returns.
+        
+        Args:
+            component: Component dictionary with part_info and metadata sections
+            
+        Behavior:
+        - Cache hits display instantly (no network delay)
+        - Cache misses show "Loading..." placeholder while fetching in background
+        - Network requests run in separate thread to prevent UI blocking
+        - UI updates via thread-safe root.after() mechanism
+        - Handles errors gracefully with appropriate messages
+        
+        Performance:
+        - Cached images: Instant display
+        - Uncached images: Non-blocking with loading feedback
+        """
+        # Create container for image
+        image_container = Frame(self.image_content, width=200, height=200, bg="white")
+        image_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        image_container.grid_propagate(False)
+        image_container.grid_rowconfigure(0, weight=1)
+        image_container.grid_columnconfigure(0, weight=1)
+
+        try:
+            part_number = component.get("part_info", {}).get("part_number", "")
+            photo_url = component.get("metadata", {}).get("photo_url", "")
+
+            # check the cache
+            image_entry = self.digikeyAPI.image_cache.request_entry(part_number=part_number)
+
+            # cache hit
+            if image_entry and image_entry.image:
+                pil_image = Image.open(BytesIO(image_entry.image))
+                pil_image.thumbnail((180, 180), Image.Resampling.LANCZOS)
+                tk_image = ImageTk.PhotoImage(pil_image)
+                image_label = Label(image_container, image=tk_image)
+                image_label.image = tk_image
+                image_label.grid(row=0, column=0)
+                return None
+
+            # cache miss, need to query digikey
+            else: 
+                Label(
+                    image_container, 
+                    text="Loading...", 
+                    justify="center", 
+                    font=("Arial", 12)
+                ).grid(row=0, column=0)
+                
+                def fetch_in_bg():
+                    # Create thread-local DigiKey API instance with its own image cache
+                    # This avoids SQLite threading issues and is safer for future developers
+                    from digikey_api_local import Digikey_API_Call
+                    thread_api = Digikey_API_Call()
+                    
+                    res = thread_api.fetch_image_data(photo_url=photo_url, part_number=part_number)
+                    self.root.after(0, lambda: self.handle_image_result(res, image_container))
+
+                threading.Thread(target=fetch_in_bg, daemon=True).start()
+                return None
+
+        except Exception as e:
+            Label(
+                image_container, 
+                text=f"Image Error:\n{str(e)[:50]}...", 
+                justify="center", 
+                font=("Arial", 8), 
+                fg="red"
+            ).grid(row=0, column=0)
+            return None
+
+    def handle_image_result(self, image_data: ImageCacheEntry, container) -> None:
+        # clear placeholder
+        for widget in container.winfo_children():
+            widget.destroy()
+
+        # check valid input
+        if not image_data or not image_data.image:
+            Label(
+                container,
+                text="No Image\nAvailable",
+                justify="center",
+                font=("Arial", 12)
+            ).grid(row=0, column=0)
+            return
+
+        try:
+            pil_image = Image.open(BytesIO(image_data.image))
+            pil_image.thumbnail((180, 180), Image.Resampling.LANCZOS)
+            tk_image = ImageTk.PhotoImage(pil_image)
+
+            image_label = Label(container, image=tk_image)
+            image_label.image = tk_image
+            image_label.grid(row=0, column=0)
+        except Exception as e: # handle unexpected error
+            Label(
+                container,
+                text=f"Image Error:\n{str(e)[:50]}...",
+                justify="center",
+                font=("Arial", 8),
+                fg="red"
+            ).grid(row=0, column=0)
+            return None
 
     def create_action_buttons(self, component):
         """Create action buttons for the selected component"""
