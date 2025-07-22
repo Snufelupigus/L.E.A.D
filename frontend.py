@@ -13,7 +13,48 @@ from io import BytesIO
 import webbrowser
 
 class Frontend:
+    """
+    Main GUI application for the L.E.A.D. Component Catalogue system.
+    
+    Provides a Tkinter-based interface for component inventory management with
+    integrated DigiKey API access, LED location highlighting, and image caching.
+    Supports three main views: Home (statistics), Search (component lookup), 
+    and Add (new component entry).
+    
+    Features:
+        - Component search and management with real-time filtering
+        - DigiKey API integration for automatic part data retrieval  
+        - LED strip control for physical component location highlighting
+        - Image caching for component photos
+        - BOM processing for checkout/checkin operations
+        - Test mode toggle for development/testing
+        - Barcode scanning support
+        - Bulk component entry
+    
+    Attributes:
+        backend: Backend instance for data operations
+        digikeyAPI: DigiKey API client for part lookups
+        ledControl: LED controller for location highlighting  
+        imageCache: Image cache for component photos
+        current_frame: Currently displayed main content frame
+        current_menu: Reference to current menu function
+        test_mode: Whether test mode is enabled
+        last_highlighted_location: Last LED location highlighted
+    """
+    
     def __init__(self, backend, digikeyAPI, ledControl, imageCache):
+        """
+        Initialize the Frontend GUI application.
+        
+        Args:
+            backend: Backend instance for component data management
+            digikeyAPI: DigiKey API client for part information retrieval
+            ledControl: LED controller for component location highlighting
+            imageCache: Image cache for component photos
+            
+        Sets up the main Tkinter window, creates menus, configures keyboard
+        shortcuts, and displays the home page. Enters the main event loop.
+        """
         self.backend = backend
         self.digikeyAPI = digikeyAPI
         self.ledControl = ledControl
@@ -48,14 +89,38 @@ class Frontend:
         self.root.mainloop()
 
     def __exit__(self):
+        """
+        Clean shutdown handler for application exit.
+        
+        Forces immediate process termination using SIGTERM signal.
+        Called when the main window close button is clicked.
+        """
         os.kill(os.getpid(), signal.SIGTERM)
 
     def switch_menu(self, menu_func):
-        """Helper to switch menus and record the current menu"""
-        self.currrent_menu = menu_func
+        """
+        Switch to a different menu view and track current menu state.
+        
+        Args:
+            menu_func: Function to call to display the new menu/view
+            
+        Updates the current_menu reference and calls the provided function
+        to switch to the new view. Used for navigation between Home, Search, and Add views.
+        """
+        self.currrent_menu = menu_func  # Note: typo in original code
         menu_func()
 
     def create_menu(self):
+        """
+        Create and configure the application menu bar.
+        
+        Sets up two main menu sections:
+        - Navigation: Home, Search, Add views
+        - Tools: Undo deletion functionality
+        
+        Menus are attached to the main window and configured with appropriate
+        command callbacks for each menu item.
+        """
         menu_bar = Menu(self.root)
 
         nav_menu = Menu(menu_bar, tearoff=0)
@@ -75,6 +140,23 @@ class Frontend:
         self.root.config(menu=menu_bar)
 
     def toggle_test_mode(self, event=None):
+        """
+        Toggle between production and test database modes.
+        
+        Args:
+            event: Optional keyboard event (for Ctrl+Alt+T binding)
+            
+        Switches between component_catalogue.json (production) and 
+        test_catalogue.json (test) databases. Test mode changes the
+        window background to red as a visual indicator.
+        
+        Side Effects:
+            - Changes backend data file path
+            - Reloads component data from new database
+            - Shows info dialog about mode change
+            - Changes window background color
+            - Refreshes current view
+        """
         self.test_mode = not self.test_mode
         
         current_dir = os.path.dirname(self.backend.data_file)
@@ -97,6 +179,18 @@ class Frontend:
             self.show_home()
 
     def clear_frame(self):
+        """
+        Clear the current main content frame and prepare for new content.
+        
+        Performs cleanup operations:
+        - Turns off any recently activated LEDs
+        - Unbinds keyboard events from current frame
+        - Destroys existing frame widgets
+        - Creates new frame with grid layout configuration
+        
+        The new frame is configured for responsive behavior with proper
+        row/column weights for expansion.
+        """
         self.ledControl.turn_off_recent()
         if self.current_frame is not None:
             self.current_frame.unbind_all("<Return>")
@@ -113,6 +207,18 @@ class Frontend:
 
 
     def show_home(self):
+        """
+        Display the Home view with inventory statistics and low stock tracking.
+        
+        Shows:
+        - Total parts count and component types summary
+        - BOM processing buttons (Checkout/Check In)
+        - Low stock items table with export functionality
+        - Clickable product URLs for low stock items
+        
+        The low stock table shows components below their defined thresholds
+        and allows direct access to DigiKey product pages for reordering.
+        """
         self.clear_frame()
         
         # Configure grid layout for home page
@@ -191,6 +297,26 @@ class Frontend:
         low_stock_tree.bind("<Double-Button-1>", open_product)
 
     def show_search(self):
+        """
+        Display the Search view for component lookup and management.
+        
+        Creates a sophisticated search interface with:
+        - Real-time search filtering as user types
+        - Three-panel detail view (Part Info, Metadata, Image)
+        - Component table with sortable columns
+        - LED highlighting for selected components
+        - Action buttons (Edit, Checkout, Highlight)
+        
+        The search functionality provides instant filtering of the component
+        database and displays detailed information including cached images
+        from DigiKey. LEDs automatically highlight the physical location
+        of selected components.
+        
+        Layout:
+        - Top: Search entry field
+        - Middle: Component details (Part Info | Metadata | Image)  
+        - Bottom: Results table and action buttons
+        """
         # Initialize class attributes for widget references
         self.results_label = None
         self.action_button_frame = None
@@ -417,7 +543,28 @@ class Frontend:
 
 
     def show_component_details_from_table(self):
-        """Show component details when table selection changes"""
+        """
+        Display detailed component information when table selection changes.
+        
+        Triggered when a user clicks on a component in the search results table.
+        Updates the three-panel detail view with part information, metadata,
+        and component image. Also handles LED highlighting for physical location.
+        
+        Behavior:
+        - Clears details if no component selected
+        - Looks up full component data by part number
+        - Updates Part Info panel with inventory details
+        - Updates Metadata panel with DigiKey information  
+        - Loads component image asynchronously (target for optimization)
+        - Highlights component location with green LED
+        - Turns off previous LED highlight
+        - Creates action buttons for selected component
+        
+        Performance:
+            - Cached images display instantly without network requests
+            - Only uncached images cause UI blocking during network fetch
+            - Async threading wrapper needed for smooth UX on cache misses
+        """
         selected = self.search_tree.selection()
         if not selected:
             self.clear_component_details()
@@ -516,7 +663,30 @@ class Frontend:
 
 
     def load_component_image_new(self, component):
-        """Load and display component image in the new layout"""
+        """
+        Load and display component image in the search view layout.
+        
+        Args:
+            component: Component dictionary with part_info and metadata sections
+            
+        Creates a 200x200 pixel container and attempts to load the component
+        image from DigiKey via the image cache. Images are scaled to fit within
+        180x180 pixels while maintaining aspect ratio.
+        
+        Behavior:
+        - Fetches image using DigiKey API with intelligent caching
+        - Cache hits display instantly (no network delay)
+        - Cache misses still block UI during 5-second network request
+        - Scales images to thumbnail size (180x180 max)
+        - Shows "No Image Available" for missing images
+        - Shows error message for load failures
+        - Images are stored in cache for future access
+        
+        Performance:
+            - Most images load instantly from cache after first view
+            - Only new/uncached images cause UI blocking
+            - Target for threading optimization: wrap network requests only
+        """
         # Create fixed-size container for image
         image_container = Frame(self.image_content, width=200, height=200, bg="white")
         image_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
@@ -628,6 +798,26 @@ class Frontend:
             self.action_button_frame = None
 
     def show_add(self):
+        """
+        Display the Add Component view for entering new inventory items.
+        
+        Provides multiple methods for adding components:
+        - Manual entry with DigiKey API lookup
+        - Barcode scanning for quick entry
+        - Bulk barcode processing
+        
+        Features:
+        - Auto-populates component details from DigiKey API
+        - Duplicate detection with fuzzy matching
+        - Component type selection from predefined list
+        - Real-time component details preview
+        - Three-column detail view showing fetched information
+        - Component table showing all inventory
+        
+        The interface automatically fetches product details, pricing,
+        descriptions, and images when a part number is entered,
+        reducing manual data entry requirements.
+        """
         self.clear_frame()
 
         Label(self.current_frame, text="Add New Component", font=("Arial", 16)).grid(row=0, column=0, columnspan=4, pady=20, sticky="w")
@@ -1632,6 +1822,32 @@ class Frontend:
         messagebox.showinfo("BOM Processed", "BOM processing complete. Inventory has been updated.")
 
     def checkout_component(self, tree):
+        """
+        Handle component checkout (removal from inventory).
+        
+        Args:
+            tree: Treeview widget containing the selected component
+            
+        Provides an interactive workflow for removing components from inventory:
+        1. Prompts user for quantity to remove
+        2. Validates inventory availability
+        3. Lights up the component location LED
+        4. Waits for user confirmation of physical removal
+        5. Updates inventory count in database
+        6. Refreshes the display
+        
+        The LED highlighting helps users locate the correct physical component
+        bin, and the confirmation step ensures inventory accuracy by requiring
+        user acknowledgment of the physical removal.
+        
+        Behavior:
+        - Shows error if no component selected
+        - Validates quantity input
+        - Checks sufficient inventory
+        - Highlights component location with LED
+        - Waits for user confirmation before updating count
+        - Refreshes component table after successful checkout
+        """
         selected = tree.selection()
         if not selected:
             messagebox.showerror("Error", "No component selected!")
