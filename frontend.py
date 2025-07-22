@@ -1,5 +1,5 @@
 from tkinter import Tk, Label, Entry, Button, Canvas, StringVar, simpledialog, OptionMenu,  Menu, Frame, Toplevel, messagebox, Scrollbar, LEFT, BOTH, RIGHT, Y,  END, Checkbutton, BooleanVar, TOP, X
-from tkinter.ttk import Treeview, Combobox
+from tkinter.ttk import Treeview, Combobox, Style
 from tkinter.messagebox import askyesno
 from tkinter.filedialog import asksaveasfilename, askopenfilename
 
@@ -454,11 +454,11 @@ class Frontend:
 
         # Column options for the table
         columns_options = {
-            "Part Number": {"width": 150, "anchor": "w"},
-            "Manufacturer Number": {"width": 150, "anchor": "w"},
-            "Location": {"width": 80, "anchor": "center"},
-            "Count": {"width": 80, "anchor": "center"},
-            "Type": {"width": 200, "anchor": "w"}
+            "Part Number": {"width": 150, "anchor": "e"},
+            "Manufacturer Number": {"width": 150, "anchor": "e"},
+            "Location": {"width": 80, "anchor": "e"},
+            "Count": {"width": 80, "anchor": "e"},
+            "Type": {"width": 200, "anchor": "e"}
         }
 
         # Create the treeview
@@ -928,7 +928,7 @@ class Frontend:
         """
         self.clear_frame()
 
-        Label(self.current_frame, text="Add New Component", font=("Arial", 16)).grid(row=0, column=0, columnspan=4, pady=20, sticky="w")
+        Label(self.current_frame, text="Add New Component", font=("Arial", 16)).grid(row=0, column=0, columnspan=4, pady=2, sticky="w")
 
         fields = {
             "part_number": (
