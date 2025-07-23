@@ -17,15 +17,14 @@ UI Request → fetch_image_data()
 ### Revised Implementation Plan
 
 #### **Phase 1: Frontend Threading (Simple & Effective)**
-- [ ] Create async wrapper for `load_component_image_new()`
-- [ ] Add placeholder display during loading ("Loading..." text)
-- [ ] Use `threading.Thread` for network requests only
-- [ ] Use `root.after()` for thread-safe UI updates
-- [ ] Handle loading/error states in UI
+- [x] Create async wrapper for `load_component_image_new()`
+- [x] Add placeholder display during loading ("Loading..." text)
+- [x] Use `threading.Thread` for network requests only
+- [x] Use `root.after()` for thread-safe UI updates
+- [x] Handle loading/error states in UI
 
 #### **Phase 2: UX Enhancements**
-- [ ] Add loading indicators/spinners
-- [ ] Implement graceful error states with retry options  
+- [ ] Implement graceful error states with retry options
 - [ ] Add request cancellation on view changes
 - [ ] Preload images for search results in background
 
@@ -51,7 +50,6 @@ UI Request → fetch_image_data()
 ## request_media
 - [x] set up prebuild binary as venv source for my local development
 - [x] format headers and param correctly
-- [ ] extract the model from digikey
-- [ ] dl the image from the supplied link
-- [ ] create a database and cash the image blob
-- [ ] develop logic for 
+- [x] extract the model from digikey
+- [x] dl the image from the supplied link
+- [x] create a database and cash the image blob
