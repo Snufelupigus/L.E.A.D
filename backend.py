@@ -1,19 +1,20 @@
 import json
-from tkinter import messagebox
 import os
-import time
 import csv
 import shutil
 import re
 import difflib
 import datetime
 import threading
-from collections import OrderedDict
-import datetime
+import logging
+from file_initializer import FileInitializer
+
+logger = logging.getLogger(__name__)
 
 class Backend:
-    def __init__(self, ledControl, data_file=None, changelog_file=None):
+    def __init__(self, ledControl, data_file=None, changelog_file=None, dialog_callbacks=None):
         self.ledControl = ledControl
+        self.dialog_callbacks = dialog_callbacks or {}
 
         script_dir = os.path.dirname(os.path.abspath(__file__))  # Get directory of backend.py
 
@@ -26,15 +27,15 @@ class Backend:
                 with open(config_path, "r") as f:
                     config = json.load(f)
             except json.JSONDecodeError:
-                print("Error: Could not parse config.json. Using default file names.")
+                logger.warning("Could not parse config.json. Using default file names.")
         else:
-            print("Config file not found. Using default file names.")
+            logger.info("Config file not found. Using default file names.")
 
         if data_file is None:
-            data_file_rel = config.get("FILES", {}).get("COMPONENT_CATALOGUE", "Databases/component_catalogue.json")
+            data_file_rel = config.get("FILES", {}).get("COMPONENT_CATALOGUE", "") or FileInitializer.DEFAULT_PATHS["COMPONENT_CATALOGUE"]
             data_file = os.path.join(script_dir, data_file_rel) if not os.path.isabs(data_file_rel) else data_file_rel
         if changelog_file is None:
-            changelog_file_rel = config.get("FILES", {}).get("CHANGELOG", "Databases/changelog.txt")
+            changelog_file_rel = config.get("FILES", {}).get("CHANGELOG", "") or FileInitializer.DEFAULT_PATHS["CHANGELOG"]
             changelog_file = os.path.join(script_dir, changelog_file_rel) if not os.path.isabs(changelog_file_rel) else changelog_file_rel
 
         self.data_file = data_file
@@ -45,22 +46,34 @@ class Backend:
         self.max_leds = 300
         self.undo_stack = []
 
-        print("Using catalogue file:", self.data_file)
+        logger.info("Using catalogue file: %s", self.data_file)
 
         self.last_activity = datetime.datetime.now()
 
         self.schedule_backup(interval_seconds=600)
 
-    import re
-
     def normalize_part_number(self, part_number):
-        part_number = part_number.strip().lower()
-        # Match formats like ...TR-ND, ...CT-ND, ...DKR-ND, ...1-ND, etc.
-        pattern = re.compile(r"^(.*?)-(?:ct|tr|dkr|1|2|3)-(nd)$", re.IGNORECASE)
-        match = pattern.match(part_number)
-        if match:
-            return f"{match.group(1)}-{match.group(2)}"
-        return part_number
+        normalized = str(part_number).strip().lower()
+        if not normalized.endswith("-nd"):
+            return normalized
+
+        # DigiKey package variants append CT/TR/DKR directly before -ND.
+        # Some older variants also use -1/-2/-3 before -ND.
+        body = normalized[:-3]
+        body = re.sub(r"(ct|tr|dkr)$", "", body, flags=re.IGNORECASE)
+        body = re.sub(r"-(?:1|2|3)$", "", body, flags=re.IGNORECASE)
+        return f"{body}-nd"
+
+    def _notify(self, level, title, message):
+        callback = self.dialog_callbacks.get(level)
+        if callback:
+            callback(title, message)
+
+    def _confirm(self, title, message, default=False):
+        callback = self.dialog_callbacks.get("confirm")
+        if callback:
+            return bool(callback(title, message))
+        return default
 
 
     def load_components(self):
@@ -74,7 +87,7 @@ class Backend:
         self.last_activity = datetime.datetime.now()
         with open(self.data_file, "w") as file:
             json.dump(self.components, file, indent=4)
-            print(f"Data saved to: {os.path.abspath(self.data_file)}")
+            logger.info("Data saved to: %s", os.path.abspath(self.data_file))
 
         self.log_change("Saved components file.")
 
@@ -142,7 +155,7 @@ class Backend:
             assigned = self.get_assigned_locations()
             if location in assigned and "bin" not in location.lower():
                 # Location is already taken.
-                messagebox.showerror("Location Error", f"Location {location} is already assigned to another component.")
+                self._notify("error", "Location Error", f"Location {location} is already assigned to another component.")
                 raise Exception(f"Location {location} is already assigned to another component.")
         
         # (Optional) Check for duplicates and update count if needed.
@@ -207,33 +220,33 @@ class Backend:
         types = set(comp["part_info"]["type"] for comp in self.components)
         return {"total_parts": total_parts, "types": list(types)}
     
-    def barcode_decoder(self, barcode):
+    def barcode_decoder(self, barcode, show_errors=True):
         # Validate and remove header
         if not barcode.startswith("[)>"):
-            messagebox.showwarning("Barcode Format", f"Invalid barcode format, please try again")
+            if show_errors:
+                self._notify("warning", "Barcode Format", "Invalid barcode format, please try again")
             raise ValueError("Invalid barcode format")
 
         remaining = barcode[6:]
 
         part_number = remaining.split("1P")
+        manufacturer_number = part_number[1].split("30P")
+        manufacturer_number = manufacturer_number[0]
         count = part_number[1].split("4L")
         part_number = part_number[0]
         count = count[1].split("Q")
         count = count[1].split("11Z")
         count = count[0]
 
-        print(part_number)
-        print(count)
-
         parsed_data = {
             "part_number": part_number,
             "count": count,
+            "manufacturer_number": manufacturer_number,
         }
         return parsed_data
     
-    # TODO:tariq maybe seperate the check from the actual updating the part
     def check_duplicate(self, component):
-        new_raw = component["part_number"].strip().lower()
+        new_raw = component["manufacturer_number"].strip().lower()
         new_part_number = self.normalize_part_number(new_raw)
 
         try:
@@ -246,7 +259,7 @@ class Backend:
         normalized_parts = []
 
         for comp in existing_components:
-            part = comp.get("part_info", {}).get("part_number", "").strip().lower()
+            part = comp.get("part_info", {}).get("manufacturer_number", "").strip().lower()
             if part:
                 normalized = self.normalize_part_number(part)
                 part_map[normalized] = part  # last one wins if duplicates
@@ -256,7 +269,7 @@ class Backend:
         if new_part_number in normalized_parts:
             actual_match = part_map[new_part_number]
             for comp in existing_components:
-                if comp.get("part_info", {}).get("part_number", "").strip().lower() == actual_match:
+                if comp.get("part_info", {}).get("manufacturer_number", "").strip().lower() == actual_match:
                     try:
                         existing_count = int(comp["part_info"].get("count", 0))
                     except ValueError:
@@ -264,10 +277,10 @@ class Backend:
                     updated_count = existing_count + new_count
                     comp["part_info"]["count"] = updated_count
 
-                    messagebox.showinfo("Found Duplicate", f"Component {actual_match} already exists.\nAdded {new_count} units.")
+                    self._notify("info", "Found Duplicate", f"Component {actual_match} already exists.\nAdded {new_count} units.")
                     loc = comp["part_info"]["location"]
                     self.ledControl.set_led_on(loc, 0, 255, 0)
-                    messagebox.showinfo("Fill Vial", f"Fill vial at {loc}.")
+                    self._notify("info", "Fill Vial", f"Fill vial at {loc}.")
                     self.ledControl.turn_off_led(loc)
 
                     self.log_change(
@@ -283,13 +296,13 @@ class Backend:
             suggested_norm = close_matches[0]
             suggested_actual = part_map[suggested_norm]
 
-            response = messagebox.askyesno(
+            response = self._confirm(
                 "Possible Duplicate",
                 f"Did you mean '{suggested_actual}' instead of '{new_raw}'?"
             )
             if response:
                 for comp in existing_components:
-                    if comp.get("part_info", {}).get("part_number", "").strip().lower() == suggested_actual:
+                    if comp.get("part_info", {}).get("manufacturer_number", "").strip().lower() == suggested_actual:
                         try:
                             existing_count = int(comp["part_info"].get("count", 0))
                         except ValueError:
@@ -297,10 +310,10 @@ class Backend:
                         updated_count = existing_count + new_count
                         comp["part_info"]["count"] = updated_count
 
-                        messagebox.showinfo("Found Duplicate", f"Component {suggested_actual} already exists.\nAdded {new_count} units.")
+                        self._notify("info", "Found Duplicate", f"Component {suggested_actual} already exists.\nAdded {new_count} units.")
                         loc = comp["part_info"]["location"]
                         self.ledControl.set_led_on(loc, 0, 255, 0)
-                        messagebox.showinfo("Fill Vial", f"Fill vial at {loc}.")
+                        self._notify("info", "Fill Vial", f"Fill vial at {loc}.")
                         self.ledControl.turn_off_led(loc)
 
                         self.log_change(
@@ -343,10 +356,6 @@ class Backend:
         Returns a list of dicts ready for display.
         """
         bom_list = []
-        print("First 5 inventory parts:")
-        for i, c in enumerate(self.get_all_components()[:5]):
-            print(f"{i}: {c['part_info']['part_number']}")
-        print("BOM checkout inventory size:", len(self.get_all_components()))
         with open(file_path, newline='') as f:
             reader = csv.reader(f)
             header = next(reader, None)  # skip header line
@@ -379,9 +388,6 @@ class Backend:
                         except ValueError:
                             current_count = None
                         break
-
-                print(f"Comparing normalized BOM part: {normalized_digikey}")
-                print(f"Against inventory part: {normalized_comp}")
 
                 bom_list.append({
                     "part":          part,
@@ -600,12 +606,16 @@ class Backend:
             if inactivity < datetime.timedelta(minutes=30):
                 self.backup_catalogue()
                 # Reschedule the next backup.
-                threading.Timer(interval_seconds, backup_wrapper).start()
+                timer = threading.Timer(interval_seconds, backup_wrapper)
+                timer.daemon = True
+                timer.start()
             else:
-                print("Autobackup deactivated due to inactivity (no changes for over 30 minutes).")
+                logger.info("Autobackup deactivated due to inactivity (no changes for over 30 minutes).")
         
         # Schedule the first backup
-        threading.Timer(interval_seconds, backup_wrapper).start()
+        timer = threading.Timer(interval_seconds, backup_wrapper)
+        timer.daemon = True
+        timer.start()
 
     def backup_catalogue(self):
         """
@@ -624,6 +634,6 @@ class Backend:
         backup_path = os.path.join(backup_dir, backup_filename)
         try:
             shutil.copy2(catalogue_path, backup_path)
-            print(f"Backup created: {backup_path}")
+            logger.info("Backup created: %s", backup_path)
         except Exception as e:
-            print("Error creating backup:", e)
+            logger.exception("Error creating backup: %s", e)

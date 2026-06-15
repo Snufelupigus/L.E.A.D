@@ -3,11 +3,15 @@ import threading
 import time
 import json
 import os
-from tkinter import messagebox
+import logging
 from threading import Lock
 
+logger = logging.getLogger(__name__)
+
 class LedController:
-    def __init__(self):
+    def __init__(self, show_errors=True, error_reporter=None):
+        self.show_errors = show_errors
+        self.error_reporter = error_reporter
         self.num_leds = 104
         self.recent_leds = set()
         self._req_id = 0
@@ -15,10 +19,10 @@ class LedController:
         self.port = None
         self.baudrate = 9600
         self.timeout = 1
+        self.last_error = ""
 
         # Protect set mutations across threads
         self._req_lock = threading.Lock()   # for highlight request gating
-        self._led_lock = threading.Lock()
         self._lock = Lock()
 
         self.load_config()
@@ -32,27 +36,102 @@ class LedController:
                 config = json.load(file)
                 serial_config = config.get("SERIAL", {})
                 self.port = serial_config.get("PORT", "")
-                self.baudrate = serial_config.get("BAUDRATE", 9600)
-                self.timeout = serial_config.get("TIMEOUT", 1)
+                baudrate = serial_config.get("BAUDRATE", "")
+                timeout = serial_config.get("TIMEOUT", "")
+                self.baudrate = int(baudrate) if str(baudrate).strip() else 9600
+                self.timeout = int(timeout) if str(timeout).strip() else 1
         except Exception as e:
-            print(f"Error loading config file: {e}")
-            messagebox.showerror("Config Error", "Failed to load serial settings from config.json")
+            logger.exception("Error loading config file: %s", e)
+            self._show_error("Config Error", "Failed to load serial settings from config.json")
+            self.port = ""
+            self.baudrate = 9600
+            self.timeout = 1
 
     def connect_serial(self):
         """Establish serial connection with LED controller"""
         try:
+            if self.ser is not None:
+                try:
+                    self.ser.close()
+                except Exception:
+                    pass
+                self.ser = None
             if not self.port:
                 raise ValueError("Serial port not defined in config.json")
             self.ser = serial.Serial(port=self.port, baudrate=self.baudrate, timeout=self.timeout)
             time.sleep(0.5)  # Let Arduino initialize
             self.turn_off_all()
+            self.last_error = ""
         except Exception as e:
-            print(f"Error opening serial port: {e}")
-            messagebox.showerror("LED System Error", "LED Controller Failed To Load")
+            logger.warning("Error opening serial port: %s", e)
+            self.last_error = str(e)
+            self._show_error("LED System Error", "LED Controller Failed To Load")
             self.ser = None
 
+    def _show_error(self, title, message):
+        if self.show_errors and self.error_reporter:
+            self.error_reporter(title, message)
+
+    def _handle_serial_error(self, error):
+        self.last_error = str(error)
+        try:
+            if self.ser is not None:
+                self.ser.close()
+        except Exception:
+            pass
+        self.ser = None
+        with self._lock:
+            self.recent_leds.clear()
+
+    def _write_command(self, command):
+        if self.ser is None:
+            return False
+        try:
+            self.ser.write(command)
+            return True
+        except Exception as error:
+            logger.warning("LED controller write failed: %s", error)
+            self._handle_serial_error(error)
+            return False
+
+    def _flush_serial(self):
+        if self.ser is None:
+            return False
+        try:
+            self.ser.flush()
+            return True
+        except Exception as error:
+            logger.warning("LED controller flush failed: %s", error)
+            self._handle_serial_error(error)
+            return False
+
+    def is_connected(self):
+        return bool(self.ser is not None and getattr(self.ser, "is_open", True))
+
+    def get_status(self):
+        if self.is_connected():
+            return {
+                "connected": True,
+                "label": "Connected",
+                "details": f"LED controller connected on {self.port} at {self.baudrate} baud.",
+            }
+
+        if self.port:
+            detail = f"LED controller is not connected. Configured port: {self.port}."
+        else:
+            detail = "LED controller is not connected. No serial port is configured."
+
+        if self.last_error:
+            detail = f"{detail} Last error: {self.last_error}"
+
+        return {
+            "connected": False,
+            "label": "Disconnected",
+            "details": detail,
+        }
+
     def reconnect(self):
-        print("Attempting to reconnect to LED controller...")
+        logger.info("Attempting to reconnect to LED controller...")
         self.connect_serial()
 
     def location_to_index(self, location_code):
@@ -85,8 +164,10 @@ class LedController:
         if index is None or self.ser is None:
             return
         cmd = f"SET {index} {red} {green} {blue}\n".encode('utf-8')
-        self.ser.write(cmd)
-        self.ser.flush()
+        if not self._write_command(cmd):
+            return
+        if not self._flush_serial():
+            return
         with self._lock:
             self.recent_leds.add(index)
 
@@ -102,9 +183,10 @@ class LedController:
 
         for index in leds:
             cmd = f"SET {index} 0 0 0\n".encode('utf-8')
-            self.ser.write(cmd)
+            if not self._write_command(cmd):
+                return
             time.sleep(0.005)
-        self.ser.flush()
+        self._flush_serial()
 
     def turn_off_all(self):
         """Turns off every LED, with a tiny delay to ensure no commands get dropped."""
@@ -113,9 +195,11 @@ class LedController:
 
         for i in range(self.num_leds):
             cmd = f"SET {i} 0 0 0\n".encode('utf-8')
-            self.ser.write(cmd)
+            if not self._write_command(cmd):
+                return
             time.sleep(0.05)    # staggered write
-        self.ser.flush()
+        if not self._flush_serial():
+            return
         with self._lock:
             self.recent_leds.clear()
 
@@ -124,8 +208,10 @@ class LedController:
         if index is None or self.ser is None:
             return
         cmd = f"SET {index} 0 0 0\n".encode('utf-8')
-        self.ser.write(cmd)
-        self.ser.flush()
+        if not self._write_command(cmd):
+            return
+        if not self._flush_serial():
+            return
         with self._lock:
             self.recent_leds.discard(index)
 
@@ -143,9 +229,10 @@ class LedController:
             time.sleep(0.05)
             index = self.location_to_index(loc)
             if index is not None:
-                self.ser.write(f"SET {index} 0 0 0\n".encode('utf-8'))
+                if not self._write_command(f"SET {index} 0 0 0\n".encode('utf-8')):
+                    return
                 self.recent_leds.discard(index)
-        self.ser.flush()
+        self._flush_serial()
 
     def highlight_location(self, location_code, delay_ms=50):
         """

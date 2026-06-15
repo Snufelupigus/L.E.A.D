@@ -1,23 +1,31 @@
-from image_cache import ImageCacheEntry, Image_Cache
+from image_cache import ImageCache, ImageCacheEntry
 from datetime import datetime, timezone
-from PIL import Image
-from io import BytesIO
 import requests
 import logging
-logging.basicConfig(level=logging.DEBUG)
 import json
 import os
 import time
-from tkinter import messagebox
+
+logger = logging.getLogger(__name__)
 
 
 
 class Digikey_API_Call:
     ACCESS_TOKEN: str
-    def __init__(self):
+    def __init__(self, show_errors=True, error_reporter=None):
         self.config_file = os.path.join(os.path.dirname(__file__), "Databases", "config.json")
-        self.image_cache = Image_Cache()
+        self.image_cache = ImageCache()
+        self.show_errors = show_errors
+        self.error_reporter = error_reporter
+        self.last_error = ""
+        self.TOKEN_EXPIRES = 0
         self.load_config()
+
+    def _report_error(self, title, message):
+        self.last_error = message
+        logger.error("%s: %s", title, message)
+        if self.show_errors and self.error_reporter:
+            self.error_reporter(title, message)
 
     def load_config(self):
         """Loads API configuration from config.json"""
@@ -35,14 +43,14 @@ class Digikey_API_Call:
                     raise ValueError("Digikey Client Secret is missing in config.json")
                 
         except (FileNotFoundError, json.JSONDecodeError, ValueError) as e:
-            messagebox.showerror("Configuration Error", f"Failed to load config.json:\n{e}")
+            self._report_error("Configuration Error", f"Failed to load config.json:\n{e}")
             self.CLIENT_ID = None
             self.CLIENT_SECRET = None
 
     def refresh_access_token(self):
         #Check if we have a client id and secret.
         if not self.CLIENT_ID or not self.CLIENT_SECRET:
-            messagebox.showerror("API Error", "Missing Digikey client ID or secret!")
+            self._report_error("API Error", "Missing Digikey client ID or secret!")
             return None
         
 
@@ -57,44 +65,43 @@ class Digikey_API_Call:
             tokenRequest.raise_for_status()
         except requests.exceptions.HTTPError as http_error:
             #Should return as a 401 error, I think it's safe to assume that the credentials are invalid.
-            messagebox.showerror("Bad Credentials", "Credentials entered in config.json are not vaild.")
+            self._report_error("Bad Credentials", "Credentials entered in config.json are not valid.")
             return None
 
 
         self.ACCESS_TOKEN = tokenRequest.json()["access_token"]
         self.TOKEN_EXPIRES = time.time() + tokenRequest.json()["expires_in"]
+        self.last_error = ""
 
-    @staticmethod
-    def _handle_digikey_error(http_error):
+    def _handle_digikey_error(self, http_error):
         match http_error.response.status_code:
             case 400:
-                messagebox.showerror("Bad Request", "Input model is invalid or malformed.")
+                self._report_error("Bad Request", "Input model is invalid or malformed.")
             case 401:
-                messagebox.showerror("Unauthorized", "Access token is missing, expired, or invalid.")
+                self._report_error("Unauthorized", "Access token is missing, expired, or invalid.")
             case 403:
-                messagebox.showerror("Forbidden", "Access is denied. Check Client ID and subscription settings. This may also be an error with Digikeys servers.")
+                self._report_error("Forbidden", "Access is denied. Check Client ID and subscription settings. This may also be an error with Digikeys servers.")
             case 404:
-                messagebox.showerror("Not Found", "The requested resource or part number was not found.")
+                self._report_error("Not Found", "The requested resource or part number was not found.")
             case 405:
-                messagebox.showerror("Method Not Allowed", "The HTTP method used is not supported by this endpoint.")
+                self._report_error("Method Not Allowed", "The HTTP method used is not supported by this endpoint.")
             case 408:
-                messagebox.showerror("Request Timeout", "The request timed out. Please try again.")
+                self._report_error("Request Timeout", "The request timed out. Please try again.")
             case 429:
-                messagebox.showerror("Rate Limit Exceeded", "Too many requests. Please slow down.")
+                self._report_error("Rate Limit Exceeded", "Too many requests. Please slow down.")
             case 500:
-                messagebox.showerror("Server Error", "An internal server error occurred. Try again later.")
+                self._report_error("Server Error", "An internal server error occurred. Try again later.")
             case 502:
-                messagebox.showerror("Bad Gateway", "Digi-Key's server received an invalid response from upstream.")
+                self._report_error("Bad Gateway", "Digi-Key's server received an invalid response from upstream.")
             case 503:
-                messagebox.showerror("Service Unavailable", "The service is temporarily unavailable. Try again later.")
+                self._report_error("Service Unavailable", "The service is temporarily unavailable. Try again later.")
             case 504:
-                messagebox.showerror("Gateway Timeout", "The server did not receive a timely response.")
+                self._report_error("Gateway Timeout", "The server did not receive a timely response.")
             case _:
-                messagebox.showerror("HTTP Error", f"Unexpected error {http_error.response.status_code}: {http_error.response.text}")
+                self._report_error("HTTP Error", f"Unexpected error {http_error.response.status_code}: {http_error.response.text}")
 
-    @staticmethod
-    def _show_error_and_return_none(msg: str, code: int):
-        messagebox.showerror("Failed to Fetch Image", f"{msg}.\nHTTP ERROR: {code}")
+    def _show_error_and_return_none(self, msg: str, code: int):
+        self._report_error("Failed to Fetch Image", f"{msg}.\nHTTP ERROR: {code}")
         return None
 
     def fetch_image_data(self, photo_url: str, part_number: str):
@@ -127,7 +134,7 @@ class Digikey_API_Call:
                     etag=response.headers.get('ETag'),
                     fetched_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                 )
-        # TODO:tariq handle httperror while requesting
+        # For non-200/304 responses, fall back to the cached image when available.
         else:
             return cache_entry if cache_entry else self._show_error_and_return_none("Failed to load image.", 
                                                                                     response.status_code)
@@ -135,9 +142,12 @@ class Digikey_API_Call:
 
     def fetch_part_details(self, part_number: str):
         """Fetches part details from the API"""
+        self.last_error = ""
         # Check that we have a token and that it is not expired.
         if not self.ACCESS_TOKEN or time.time() > self.TOKEN_EXPIRES:
             self.refresh_access_token()
+        if not self.ACCESS_TOKEN:
+            return None
         
 
         searchHeaders = {
@@ -157,7 +167,7 @@ class Digikey_API_Call:
         }
 
         try:
-            logging.debug("Requesting the data model from digikey.")
+            logger.debug("Requesting the data model from digikey.")
             response = requests.post('https://api.digikey.com/products/v4/search/keyword', 
                                      data=json.dumps(searchParams), 
                                      headers=searchHeaders, 
@@ -170,13 +180,16 @@ class Digikey_API_Call:
             # if response.text.lstrip().startswith("<!DOCTYPE html>"):
             #     return None
 
-            result = response.json()["Products"][0]
+            products = response.json().get("Products", [])
+            if not products:
+                return None
+            result = products[0]
 
             # this would happen if there is some error on DIGIKEY side,
             # they accepted our token and they're returning a success code
             # but the body could be incorrect so we check
             if "error" in result:
-                messagebox.showerror("API Error", f"Error: {result['error']}")
+                self._report_error("API Error", f"Error: {result['error']}")
                 return None
 
             price_val = result.get('UnitPrice', 0.0)
@@ -185,7 +198,7 @@ class Digikey_API_Call:
             except ValueError:
                 price = 0.0  # or you could use None if that fits your logic
 
-            print(result.get("ProductVariations"))
+            logger.debug("Product variations: %s", result.get("ProductVariations"))
 
             return {
                 "part_info": {
@@ -209,5 +222,5 @@ class Digikey_API_Call:
             self._handle_digikey_error(http_error)
 
         except requests.exceptions.RequestException as req_error:
-            messagebox.showerror("Connection Error", f"A network error happened: \n{str(req_error)}")
+            self._report_error("Connection Error", f"A network error happened: \n{str(req_error)}")
 

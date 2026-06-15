@@ -1,8 +1,9 @@
 import os
 import sqlite3
 import logging
+import json
 from dataclasses import dataclass
-from datetime import datetime
+from file_initializer import FileInitializer
 
 @dataclass
 class ImageCacheEntry:
@@ -11,18 +12,17 @@ class ImageCacheEntry:
     etag: str | None
     fetched_at: str | None
 
-class Image_Cache:
+class ImageCache:
     def __init__(self):
-        # guaranteed to be created
-        self.db_file = os.path.join(os.path.dirname(__file__), "Databases", "image_cache.db") 
+        self.db_file = self._resolve_db_path()
         self.conn = sqlite3.connect(self.db_file)
 
-    '''
-    # enter and exit are for use in with blocks, e.g.
-    with Image_Cache() as cache:
-        if not cache.already_exists("...."):
+    """
+    Support context-manager usage, for example:
+    with ImageCache() as cache:
+        if not cache.already_exists("..."):
             cache.store_entry(entry)
-    '''
+    """
 
     def __enter__(self): 
         return self
@@ -38,20 +38,21 @@ class Image_Cache:
         except Exception:
             pass # avoid crash
 
-    def print_entry(self, part_number: str | None):
-        cursor = self.conn.cursor()
-        cursor.execute("""
-            SELECT part_number, image, etag, fetched_at 
-            FROM image_cache 
-            WHERE part_number = ?
-            """, (part_number,)) # single comma to make it a tuple
-        entry = cursor.fetchone()
-        if not entry:
-            logging.debug("Entry not found, can't print.")
-            return None
-        logging.debug("Entry:\nPart Number: {0}\nETag: {1}\nFetched at: {2}", 
-                       entry.dk_part_number, entry.etag, entry.fetched_at)
-        return None
+    def _resolve_db_path(self):
+        script_dir = os.path.dirname(__file__)
+        config_path = os.path.join(script_dir, "Databases", "config.json")
+        configured_path = ""
+        try:
+            with open(config_path, "r") as file:
+                config = json.load(file)
+                configured_path = config.get("FILES", {}).get("IMAGE_CACHE", "")
+        except (FileNotFoundError, json.JSONDecodeError):
+            configured_path = ""
+
+        relative_path = configured_path or FileInitializer.DEFAULT_PATHS["IMAGE_CACHE"]
+        if os.path.isabs(relative_path):
+            return relative_path
+        return os.path.join(script_dir, relative_path)
 
     def already_exists(self, part_number: str | None):
         cursor = self.conn.cursor()
@@ -104,4 +105,8 @@ class Image_Cache:
             """, (entry.dk_part_number, entry.image, entry.etag, entry.fetched_at))
         self.conn.commit()
         cursor.close()
+
+
+# Backward-compatible alias while callers are migrated.
+Image_Cache = ImageCache
 

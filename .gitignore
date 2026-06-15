@@ -1,6 +1,8 @@
 /Databases/
 /archived_code/
 /backups/
+__pycache__/
+lead_cfg_*/
 *.pyc
 /.vscode/
 config.json
