@@ -12,6 +12,20 @@ from file_initializer import FileInitializer
 logger = logging.getLogger(__name__)
 
 class Backend:
+    BIN_LOCATIONS = tuple(f"Bin {index}" for index in range(1, 11))
+    AUTO_BIN_GROUPS = {
+        "Bin 1": "Resistors",
+        "Bin 2": "Capacitors",
+        "Bin 3": "Sensors",
+        "Bin 4": "Integrated Circuits",
+        "Bin 5": "Diodes / LEDs / Transistors",
+        "Bin 6": "Connectors / Cables / Switches / Relays",
+        "Bin 7": "Inductors / Transformers / Crystals",
+        "Bin 8": "Modules / Evaluation / Kits",
+        "Bin 9": "Hardware",
+        "Bin 10": "Other",
+    }
+
     def __init__(self, ledControl, data_file=None, changelog_file=None, dialog_callbacks=None):
         self.ledControl = ledControl
         self.dialog_callbacks = dialog_callbacks or {}
@@ -130,6 +144,53 @@ class Backend:
                 return candidate
         return None  # No free location available
 
+    def get_bin_locations(self):
+        return list(self.BIN_LOCATIONS)
+
+    def get_auto_bin_group(self, bin_location):
+        return self.AUTO_BIN_GROUPS.get(str(bin_location or "").strip(), "Other")
+
+    def get_auto_bin_for_type(self, component_type):
+        normalized = str(component_type or "").strip().lower()
+        if not normalized or normalized == "n/a":
+            return "Bin 10"
+
+        keyword_groups = (
+            ("Bin 1", ("resistor", "resistors")),
+            ("Bin 2", ("capacitor", "capacitors")),
+            ("Bin 3", ("sensor", "sensors", "transducer")),
+            (
+                "Bin 4",
+                (
+                    "integrated circuit",
+                    "integrated circuits",
+                    "ic",
+                    "ics",
+                    "pmic",
+                    "microcontroller",
+                    "processor",
+                    "logic",
+                    "memory",
+                    "amplifier",
+                    "interface",
+                    "optoisolator",
+                    "driver",
+                    "regulator",
+                ),
+            ),
+            ("Bin 5", ("diode", "diodes", "led", "leds", "transistor", "transistors")),
+            ("Bin 6", ("connector", "connectors", "cable", "cables", "switch", "switches", "relay", "relays")),
+            ("Bin 7", ("inductor", "inductors", "transformer", "transformers", "crystal", "crystals", "oscillator")),
+            ("Bin 8", ("module", "modules", "evaluation", "kit", "kits", "development board", "dev board")),
+            ("Bin 9", ("hardware", "fastener", "mounting")),
+        )
+
+        for bin_location, keywords in keyword_groups:
+            if any(keyword in normalized for keyword in keywords):
+                return bin_location
+
+        return "Bin 10"
+
     def add_component(self, component):
         """
         Adds a new component. If the location field is empty, automatically
@@ -183,6 +244,51 @@ class Backend:
 
     def get_all_components(self):
         return self.components
+
+    def get_component_availability(self):
+        availability = []
+        for index, component in enumerate(self.components):
+            part_info = component.get("part_info", {})
+            metadata = component.get("metadata", {})
+            availability.append(
+                {
+                    "index": index,
+                    "part_number": str(part_info.get("part_number", "N/A")),
+                    "manufacturer_number": str(part_info.get("manufacturer_number", "N/A")),
+                    "location": str(part_info.get("location", "N/A")),
+                    "in_use": str(metadata.get("in_use", "Available") or "Available"),
+                }
+            )
+        return availability
+
+    def set_component_available(self, index):
+        if not (0 <= index < len(self.components)):
+            return False
+
+        component = self.components[index]
+        metadata = component.setdefault("metadata", {})
+        if str(metadata.get("in_use", "Available") or "Available") == "Available":
+            return False
+
+        metadata["in_use"] = "Available"
+        self.save_components()
+        self.log_change(
+            f"Forced component '{component.get('part_info', {}).get('part_number', 'Unknown')}' to Available."
+        )
+        return True
+
+    def set_all_components_available(self):
+        changed = 0
+        for component in self.components:
+            metadata = component.setdefault("metadata", {})
+            if str(metadata.get("in_use", "Available") or "Available") != "Available":
+                metadata["in_use"] = "Available"
+                changed += 1
+
+        if changed:
+            self.save_components()
+            self.log_change(f"Forced {changed} components to Available.")
+        return changed
 
     def search_components(self, query):
         query = query.lower()
@@ -470,13 +576,14 @@ class Backend:
         results = []
         for row in bom_list:
             digikey = row.get("digikey", "").strip()
+            normalized_digikey = self.normalize_part_number(digikey)
             additional = additional_usage.get(digikey, 0)
             found = False
 
             # Locate the component in the catalogue
             for comp in self.components:
                 comp_digikey = comp.get("part_info", {}).get("part_number", "").strip()
-                if comp_digikey.lower() == digikey.lower():
+                if self.normalize_part_number(comp_digikey) == normalized_digikey:
                     found = True
                     try:
                         current_count = int(comp["part_info"].get("count", 0))

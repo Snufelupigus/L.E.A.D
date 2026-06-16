@@ -43,6 +43,22 @@ BOM_ROW_BACKGROUND_ROLE = Qt.ItemDataRole.UserRole + 1
 BOM_ROW_FOREGROUND_ROLE = Qt.ItemDataRole.UserRole + 2
 
 
+def populate_bin_combo(combo_box, backend, selected_location=None):
+    selected = str(selected_location or "").strip()
+    get_bins = getattr(backend, "get_bin_locations", lambda: [])
+    get_group = getattr(backend, "get_auto_bin_group", lambda value: "Other")
+    combo_box.blockSignals(True)
+    combo_box.clear()
+    for location in get_bins():
+        label = f"{location} ({get_group(location)})"
+        combo_box.addItem(label, location)
+    if selected:
+        index = combo_box.findData(selected)
+        if index >= 0:
+            combo_box.setCurrentIndex(index)
+    combo_box.blockSignals(False)
+
+
 def find_component_index(backend, target_component):
     if target_component is None:
         return -1
@@ -98,6 +114,11 @@ class MainWindow(QMainWindow):
 
         brand_title = QLabel("L.E.A.D.")
         brand_title.setObjectName("sidebarBrand")
+        self.help_button = QPushButton("?")
+        self.help_button.setObjectName("helpButton")
+        self.help_button.setToolTip("How To")
+        self.help_button.setFixedSize(36, 36)
+        self.help_button.clicked.connect(self.open_help_dialog)
         self.settings_button = QPushButton()
         self.settings_button.setObjectName("settingsButton")
         self.settings_button.setToolTip("Settings")
@@ -107,6 +128,7 @@ class MainWindow(QMainWindow):
 
         header_row.addWidget(brand_title)
         header_row.addStretch(1)
+        header_row.addWidget(self.help_button)
         header_row.addWidget(self.settings_button)
 
         brand_subtitle = QLabel("Inventory Control")
@@ -188,7 +210,7 @@ class MainWindow(QMainWindow):
                 font-size: 24px;
                 font-weight: 800;
             }
-            QPushButton#settingsButton {
+            QPushButton#settingsButton, QPushButton#helpButton {
                 background: #25333f;
                 color: #ffffff;
                 border: 1px solid #314250;
@@ -197,7 +219,7 @@ class MainWindow(QMainWindow):
                 font-size: 18px;
                 font-weight: 700;
             }
-            QPushButton#settingsButton:hover {
+            QPushButton#settingsButton:hover, QPushButton#helpButton:hover {
                 background: #2d3d4b;
                 color: #ffffff;
             }
@@ -322,6 +344,10 @@ class MainWindow(QMainWindow):
                 background: #f6f7f9;
                 color: #20242b;
             }
+            QDialog#helpDialog {
+                background: #f6f7f9;
+                color: #20242b;
+            }
             QDialog#actionDialog {
                 background: #f6f7f9;
                 color: #20242b;
@@ -366,6 +392,11 @@ class MainWindow(QMainWindow):
                 border-radius: 6px;
             }
             QFrame#settingsPanel {
+                background: white;
+                border: 1px solid #d9dde3;
+                border-radius: 6px;
+            }
+            QFrame#helpPanel {
                 background: white;
                 border: 1px solid #d9dde3;
                 border-radius: 6px;
@@ -566,7 +597,12 @@ class MainWindow(QMainWindow):
     def open_settings_dialog(self):
         dialog = SettingsDialog(self.initializer, self.backend, self.digikey_api, self)
         dialog.config_saved.connect(self.handle_config_saved)
+        dialog.availability_changed.connect(self.refresh_all_pages)
+        dialog.finished.connect(lambda _result: self.refresh_all_pages())
         dialog.exec()
+
+    def open_help_dialog(self):
+        HelpDialog(self).exec()
 
     def undo_last_deletion(self):
         if self.backend.undo_delete():
@@ -918,6 +954,10 @@ class AddPartPage(QWidget):
         "Transformer",
         "Transistor",
     )
+    STORAGE_MODE_AUTO = "auto_vial"
+    STORAGE_MODE_AUTO_BIN = "auto_bin"
+    STORAGE_MODE_BIN = "shared_bin"
+    STORAGE_MODE_MANUAL = "manual_location"
 
     def __init__(self, backend, digikey_api=None):
         super().__init__()
@@ -974,6 +1014,22 @@ class AddPartPage(QWidget):
         self.part_number_input = QLineEdit()
         self.manufacturer_number_input = QLineEdit()
         self.location_input = QLineEdit()
+        self.auto_location_input = QLineEdit()
+        self.auto_location_input.setReadOnly(True)
+        self.auto_location_input.setText("Next available vial will be assigned automatically")
+        self.auto_bin_input = QLineEdit()
+        self.auto_bin_input.setReadOnly(True)
+        self.bin_input = QComboBox()
+        self.location_stack = QStackedWidget()
+        self.location_stack.addWidget(self.auto_location_input)
+        self.location_stack.addWidget(self.auto_bin_input)
+        self.location_stack.addWidget(self.bin_input)
+        self.location_stack.addWidget(self.location_input)
+        self.storage_type_input = QComboBox()
+        self.storage_type_input.addItem("Auto Vial", self.STORAGE_MODE_AUTO)
+        self.storage_type_input.addItem("Auto Bin", self.STORAGE_MODE_AUTO_BIN)
+        self.storage_type_input.addItem("Shared Bin", self.STORAGE_MODE_BIN)
+        self.storage_type_input.addItem("Manual Location", self.STORAGE_MODE_MANUAL)
         self.count_input = QLineEdit()
         self.low_stock_input = QLineEdit()
         self.price_input = QLineEdit()
@@ -988,9 +1044,9 @@ class AddPartPage(QWidget):
         self.product_url_input = QLineEdit()
 
         self._add_row(form_layout, 0, "Part Number", self.part_number_input, "Manufacturer Number", self.manufacturer_number_input)
-        self._add_row(form_layout, 1, "Location", self.location_input, "Count", self.count_input)
-        self._add_row(form_layout, 2, "Low Stock", self.low_stock_input, "Type", self.type_input)
-        self._add_row(form_layout, 3, "Price", self.price_input, None, None)
+        self._add_row(form_layout, 1, "Storage", self.storage_type_input, "Count", self.count_input)
+        self._add_row(form_layout, 2, "Location", self.location_stack, "Low Stock", self.low_stock_input)
+        self._add_row(form_layout, 3, "Type", self.type_input, "Price", self.price_input)
 
         form_layout.addWidget(QLabel("Description"), 4, 0, alignment=Qt.AlignmentFlag.AlignTop)
         form_layout.addWidget(self.description_input, 4, 1, 1, 3)
@@ -1027,12 +1083,17 @@ class AddPartPage(QWidget):
         self.lookup_input.returnPressed.connect(self.lookup_part)
         self.barcode_button.clicked.connect(self.open_barcode_dialog)
         self.bulk_barcode_button.clicked.connect(self.open_bulk_barcode_dialog)
+        self.storage_type_input.currentIndexChanged.connect(self.update_storage_mode)
+        self.type_input.currentTextChanged.connect(self.update_auto_bin_preview)
         self.save_button.clicked.connect(self.save_part)
         self.clear_button.clicked.connect(self.clear_form)
         self.delete_button.clicked.connect(self.delete_selected_component)
         self.undo_button.clicked.connect(self.undo_requested.emit)
         self.recent_table.deleteRequested.connect(self.delete_selected_component)
 
+        self.refresh_bin_locations()
+        self.update_auto_bin_preview()
+        self.update_storage_mode()
         self.refresh()
 
     def _add_row(self, layout, row, left_label, left_widget, right_label, right_widget):
@@ -1076,7 +1137,12 @@ class AddPartPage(QWidget):
             return
         if not component:
             if context.get("mode") == "barcode":
-                self._populate_manual_barcode_data(context.get("barcode_data", {}), context.get("low_stock"))
+                self._populate_manual_barcode_data(
+                    context.get("barcode_data", {}),
+                    context.get("low_stock"),
+                    context.get("storage_mode"),
+                    context.get("storage_location"),
+                )
                 QMessageBox.information(self, "No Match", "No DigiKey match was found. The Add Part form was populated for manual review.")
             else:
                 QMessageBox.information(self, "No Match", "DigiKey did not return a matching part.")
@@ -1086,6 +1152,12 @@ class AddPartPage(QWidget):
             barcode_data = context.get("barcode_data", {})
             component["part_info"]["count"] = int(barcode_data.get("count", 0))
             component["metadata"]["low_stock"] = context.get("low_stock", "N/A")
+            component["part_info"]["location"] = self.resolve_storage_location(
+                context.get("storage_mode"),
+                bin_location=context.get("storage_location", ""),
+                manual_location=context.get("storage_location", ""),
+                component_type=component.get("part_info", {}).get("type", ""),
+            )
             try:
                 self.backend.add_component(component)
             except Exception as exc:
@@ -1113,17 +1185,65 @@ class AddPartPage(QWidget):
         self.lookup_input.setDisabled(busy)
         self.lookup_button.setText("Looking Up..." if busy else "Lookup")
 
+    def refresh_bin_locations(self, selected_location=None):
+        selected = str(selected_location or self.bin_input.currentData() or "").strip()
+        populate_bin_combo(self.bin_input, self.backend, selected)
+
+    def update_auto_bin_preview(self):
+        component_type = self.type_input.currentText().strip() or "Other"
+        auto_bin = getattr(self.backend, "get_auto_bin_for_type", lambda value: "Bin 10")(component_type)
+        group = getattr(self.backend, "get_auto_bin_group", lambda value: "Other")(auto_bin)
+        self.auto_bin_input.setText(f"{auto_bin} ({group})")
+
+    def update_storage_mode(self):
+        mode = self.storage_type_input.currentData()
+        if mode == self.STORAGE_MODE_AUTO_BIN:
+            self.update_auto_bin_preview()
+            self.location_stack.setCurrentWidget(self.auto_bin_input)
+        elif mode == self.STORAGE_MODE_BIN:
+            self.refresh_bin_locations()
+            self.location_stack.setCurrentWidget(self.bin_input)
+        elif mode == self.STORAGE_MODE_MANUAL:
+            self.location_stack.setCurrentWidget(self.location_input)
+        else:
+            self.location_stack.setCurrentWidget(self.auto_location_input)
+
+    def set_storage_from_location(self, location, storage_mode=None):
+        if storage_mode == self.STORAGE_MODE_AUTO_BIN:
+            self.storage_type_input.setCurrentIndex(self.storage_type_input.findData(self.STORAGE_MODE_AUTO_BIN))
+            self.update_auto_bin_preview()
+            self.update_storage_mode()
+            return
+
+        normalized = str(location or "").strip()
+        if not normalized or normalized.upper() == "N/A":
+            self.storage_type_input.setCurrentIndex(self.storage_type_input.findData(self.STORAGE_MODE_AUTO))
+            self.location_input.clear()
+            self.refresh_bin_locations()
+            self.update_storage_mode()
+            return
+
+        if normalized.lower().startswith("bin "):
+            self.storage_type_input.setCurrentIndex(self.storage_type_input.findData(self.STORAGE_MODE_BIN))
+            self.refresh_bin_locations(normalized.title())
+            self.update_storage_mode()
+            return
+
+        self.storage_type_input.setCurrentIndex(self.storage_type_input.findData(self.STORAGE_MODE_MANUAL))
+        self.location_input.setText(normalized)
+        self.update_storage_mode()
+
     def populate_form(self, component):
         part_info = component.get("part_info", {})
         metadata = component.get("metadata", {})
 
         self.part_number_input.setText(str(part_info.get("part_number", "")))
         self.manufacturer_number_input.setText(str(part_info.get("manufacturer_number", "")))
-        self.location_input.setText("" if part_info.get("location") == "N/A" else str(part_info.get("location", "")))
+        self.type_input.setCurrentText(str(part_info.get("type", "Other") or "Other"))
+        self.set_storage_from_location(part_info.get("location", "N/A"))
         self.count_input.setText(str(part_info.get("count", "")) if part_info.get("count") != "N/A" else "")
         self.low_stock_input.setText("" if metadata.get("low_stock") == "N/A" else str(metadata.get("low_stock", "")))
         self.price_input.setText("" if metadata.get("price") == "N/A" else str(metadata.get("price", "")))
-        self.type_input.setCurrentText(str(part_info.get("type", "Other") or "Other"))
         self.description_input.setPlainText("" if metadata.get("description") == "N/A" else str(metadata.get("description", "")))
         self.photo_url_input.setText("" if metadata.get("photo_url") == "N/A" else str(metadata.get("photo_url", "")))
         self.datasheet_url_input.setText("" if metadata.get("datasheet_url") == "N/A" else str(metadata.get("datasheet_url", "")))
@@ -1132,8 +1252,8 @@ class AddPartPage(QWidget):
     def save_part(self):
         part_number = self.part_number_input.text().strip()
         manufacturer_number = self.manufacturer_number_input.text().strip()
-        location = self.location_input.text().strip()
         component_type = self.type_input.currentText().strip() or "Other"
+        storage_mode = self.storage_type_input.currentData()
 
         if not part_number and not manufacturer_number:
             QMessageBox.warning(self, "Missing Identifier", "Part number or manufacturer number is required.")
@@ -1146,6 +1266,18 @@ class AddPartPage(QWidget):
         low_stock_text = self.low_stock_input.text().strip()
         low_stock = self.parse_int(low_stock_text, "Low stock threshold") if low_stock_text else "N/A"
         if low_stock is None:
+            return
+
+        try:
+            location = self.resolve_storage_location(
+                storage_mode,
+                bin_location=self.bin_input.currentData(),
+                manual_location=self.location_input.text(),
+                component_type=component_type,
+            )
+        except ValueError as exc:
+            title = "Missing Bin" if storage_mode == self.STORAGE_MODE_BIN else "Missing Location"
+            QMessageBox.warning(self, title, str(exc))
             return
 
         component = {
@@ -1178,12 +1310,27 @@ class AddPartPage(QWidget):
         self.refresh()
         self.part_added.emit()
 
+    def resolve_storage_location(self, storage_mode, bin_location="", manual_location="", component_type=""):
+        if storage_mode == self.STORAGE_MODE_AUTO_BIN:
+            return getattr(self.backend, "get_auto_bin_for_type", lambda value: "Bin 10")(component_type)
+        if storage_mode == self.STORAGE_MODE_BIN:
+            location = str(bin_location or "").strip()
+            if not location:
+                raise ValueError("Select a bin for this component.")
+            return location
+        if storage_mode == self.STORAGE_MODE_MANUAL:
+            location = str(manual_location).strip()
+            if not location:
+                raise ValueError("Enter a manual location or switch to Auto Vial.")
+            return location
+        return "N/A"
+
     def open_barcode_dialog(self):
-        dialog = BarcodeScanDialog(self)
+        dialog = BarcodeScanDialog(self.backend, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
-        barcode, low_stock = dialog.values()
+        barcode, low_stock, storage_mode, storage_location = dialog.values()
         try:
             barcode_data = self.backend.barcode_decoder(barcode, show_errors=False)
         except ValueError as exc:
@@ -1196,7 +1343,7 @@ class AddPartPage(QWidget):
             return
 
         if not self.digikey_api:
-            self._populate_manual_barcode_data(barcode_data, low_stock)
+            self._populate_manual_barcode_data(barcode_data, low_stock, storage_mode, storage_location)
             QMessageBox.information(self, "DigiKey Unavailable", "DigiKey lookup is unavailable. The Add Part form was populated from the barcode.")
             return
 
@@ -1206,11 +1353,13 @@ class AddPartPage(QWidget):
                 "mode": "barcode",
                 "barcode_data": barcode_data,
                 "low_stock": low_stock,
+                "storage_mode": storage_mode,
+                "storage_location": storage_location,
             },
         )
 
     def open_bulk_barcode_dialog(self):
-        dialog = BulkBarcodeDialog(self)
+        dialog = BulkBarcodeDialog(self.backend, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
@@ -1257,6 +1406,12 @@ class AddPartPage(QWidget):
 
             component["part_info"]["count"] = int(barcode_data.get("count", 0))
             component["metadata"]["low_stock"] = entry["low_stock"]
+            component["part_info"]["location"] = self.resolve_storage_location(
+                entry.get("storage_mode"),
+                bin_location=entry.get("storage_location", ""),
+                manual_location=entry.get("storage_location", ""),
+                component_type=component.get("part_info", {}).get("type", ""),
+            )
             try:
                 self.backend.add_component(component)
                 summary["added"] += 1
@@ -1361,14 +1516,18 @@ class AddPartPage(QWidget):
         )
         self.backend.save_components()
 
-    def _populate_manual_barcode_data(self, barcode_data, low_stock):
+    def _populate_manual_barcode_data(self, barcode_data, low_stock, storage_mode=None, storage_location=None):
         self.part_number_input.setText(str(barcode_data.get("part_number", "")))
         self.manufacturer_number_input.setText(str(barcode_data.get("manufacturer_number", "")))
         self.location_input.clear()
+        self.type_input.setCurrentText("Other")
+        self.set_storage_from_location(
+            storage_location if storage_mode != self.STORAGE_MODE_AUTO else "N/A",
+            storage_mode=storage_mode,
+        )
         self.count_input.setText(str(barcode_data.get("count", "")))
         self.low_stock_input.setText(str(low_stock))
         self.price_input.clear()
-        self.type_input.setCurrentText("Other")
         self.description_input.clear()
         self.photo_url_input.clear()
         self.datasheet_url_input.clear()
@@ -1399,6 +1558,9 @@ class AddPartPage(QWidget):
             widget.clear()
         self.description_input.clear()
         self.type_input.setCurrentText("Other")
+        self.storage_type_input.setCurrentIndex(self.storage_type_input.findData(self.STORAGE_MODE_AUTO))
+        self.refresh_bin_locations()
+        self.update_storage_mode()
 
     def refresh(self):
         self.recent_table.set_components(self.backend.get_all_components()[:25])
@@ -1468,8 +1630,249 @@ class MetricCard(QFrame):
         self.value_label.setText(value)
 
 
+class HelpDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("helpDialog")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setWindowTitle("How To Use L.E.A.D.")
+        self.setModal(True)
+        self.resize(860, 680)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(12)
+
+        panel = QFrame()
+        panel.setObjectName("helpPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(18, 16, 18, 16)
+        panel_layout.setSpacing(14)
+        layout.addWidget(panel)
+
+        title = QLabel("How To Use L.E.A.D.")
+        title.setObjectName("pageTitle")
+        panel_layout.addWidget(title)
+
+        hint = QLabel("Use this guide for the main workflows: setup, adding parts, scanning, checkout, and BOM processing.")
+        hint.setObjectName("barcodeHint")
+        hint.setWordWrap(True)
+        panel_layout.addWidget(hint)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        panel_layout.addWidget(scroll, 1)
+
+        body = QWidget()
+        body.setObjectName("pageViewport")
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(12)
+        scroll.setWidget(body)
+
+        sections = (
+            (
+                "Getting Started",
+                (
+                    "Use the gear button to enter DigiKey, serial, and file-path settings.",
+                    "If this is a fresh setup, save settings first so the app can create any missing runtime files.",
+                    "The LED status card on Home shows whether the lighting hardware is connected.",
+                ),
+            ),
+            (
+                "Navigation",
+                (
+                    "Home shows inventory stats, low-stock parts, LED status, and BOM actions.",
+                    "Inventory is for searching, reviewing, and deleting existing parts.",
+                    "Add Part is for DigiKey lookup, manual entry, barcode scans, and bulk scans.",
+                ),
+            ),
+            (
+                "Adding Parts",
+                (
+                    "Use DigiKey Lookup when you know a DigiKey or manufacturer part number.",
+                    "Use the Storage selector to choose between automatic vial assignment, automatic type-based bin assignment, a shared bin, or a manual location.",
+                    "Fill in Count and Low Stock before saving. In Auto Vial mode, the app assigns the next open vial slot.",
+                    "The Recently Added table at the bottom of Add Part lets you review or open details right away.",
+                ),
+            ),
+            (
+                "Barcode Scanning",
+                (
+                    "Scan Barcode on the Add Part page handles one barcode at a time.",
+                    "Bulk Scan lets you paste or scan several barcodes and low-stock values in one pass.",
+                    "If a barcode does not resolve through DigiKey, the Add Part form is populated for manual review.",
+                ),
+            ),
+            (
+                "Part Details",
+                (
+                    "Double-click any part row to open the Part Details window.",
+                    "Use Edit to make fields writable, then Save to commit changes back to the catalogue.",
+                    "Highlight turns the LED for that location on and off. Checkout removes quantity and guides the grab/return flow.",
+                ),
+            ),
+            (
+                "BOM Workflows",
+                (
+                    "Start BOM checkout or check-in from Home and choose a CSV file.",
+                    "The preview colors rows by status: green means enough stock, yellow means too few parts, red means not found.",
+                    "During checkout, the app can highlight storage locations for the required vials if the LED system is connected.",
+                ),
+            ),
+            (
+                "Inventory Management",
+                (
+                    "Use Inventory search to filter by part number, manufacturer number, type, location, or other displayed data.",
+                    "Delete removes the selected part from the catalogue. Undo Delete restores the most recent removal.",
+                    "Low-stock export writes a text report you can use for reordering.",
+                ),
+            ),
+            (
+                "Helpful Shortcuts",
+                (
+                    "Press Enter in lookup and quantity fields to trigger the same action as the main button.",
+                    "Press Ctrl+Alt+T to toggle Test Mode and switch to the test catalogue file.",
+                    "Double-clicking a part row is the fastest way to view details, edit, highlight, or check out parts.",
+                ),
+            ),
+        )
+
+        for heading, bullets in sections:
+            group = QGroupBox(heading)
+            group_layout = QVBoxLayout(group)
+            group_layout.setContentsMargins(12, 12, 12, 12)
+            group_layout.setSpacing(8)
+            for bullet in bullets:
+                label = QLabel(f"- {bullet}")
+                label.setWordWrap(True)
+                group_layout.addWidget(label)
+            body_layout.addWidget(group)
+
+        body_layout.addStretch(1)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(self.accept)
+        actions.addWidget(close_button)
+        panel_layout.addLayout(actions)
+
+
+class AvailabilityManagerDialog(QDialog):
+    availability_changed = pyqtSignal()
+
+    def __init__(self, backend, parent=None):
+        super().__init__(parent)
+        self.backend = backend
+        self.setObjectName("settingsDialog")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setWindowTitle("Part Availability")
+        self.setModal(True)
+        self.resize(960, 620)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(12)
+
+        panel = QFrame()
+        panel.setObjectName("settingsPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(18, 16, 18, 16)
+        panel_layout.setSpacing(12)
+        layout.addWidget(panel)
+
+        title = QLabel("Part Availability")
+        title.setObjectName("pageTitle")
+        panel_layout.addWidget(title)
+
+        hint = QLabel("Review every part's current availability status and force items back to Available one at a time or all at once.")
+        hint.setObjectName("barcodeHint")
+        hint.setWordWrap(True)
+        panel_layout.addWidget(hint)
+
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(("Part Number", "Manufacturer Number", "Location", "Availability", "Action"))
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        panel_layout.addWidget(self.table, 1)
+
+        actions = QHBoxLayout()
+        self.summary_label = QLabel("")
+        self.summary_label.setObjectName("barcodeHint")
+        actions.addWidget(self.summary_label)
+        actions.addStretch(1)
+        force_all_button = QPushButton("Force All Available")
+        force_all_button.clicked.connect(self.force_all_available)
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(self.accept)
+        actions.addWidget(force_all_button)
+        actions.addWidget(close_button)
+        panel_layout.addLayout(actions)
+
+        self.refresh_table()
+
+    def refresh_table(self):
+        rows = self.backend.get_component_availability()
+        self.table.setRowCount(len(rows))
+
+        unavailable_count = 0
+        for row_index, row in enumerate(rows):
+            in_use = row.get("in_use", "Available")
+            is_available = str(in_use).strip().lower() == "available"
+            if not is_available:
+                unavailable_count += 1
+
+            values = (
+                row.get("part_number", "N/A"),
+                row.get("manufacturer_number", "N/A"),
+                row.get("location", "N/A"),
+                in_use,
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                if column == 3:
+                    item.setData(
+                        Qt.ItemDataRole.ForegroundRole,
+                        QColor("#0f5132") if is_available else QColor("#7a1f1f"),
+                    )
+                self.table.setItem(row_index, column, item)
+
+            button = QPushButton("Force Available")
+            button.setEnabled(not is_available)
+            button.clicked.connect(lambda _checked=False, index=row["index"]: self.force_single_available(index))
+            self.table.setCellWidget(row_index, 4, button)
+
+        total = len(rows)
+        self.summary_label.setText(f"Unavailable: {unavailable_count} of {total}")
+
+    def force_single_available(self, index):
+        changed = self.backend.set_component_available(index)
+        if changed:
+            self.availability_changed.emit()
+        self.refresh_table()
+
+    def force_all_available(self):
+        changed = self.backend.set_all_components_available()
+        if changed:
+            self.availability_changed.emit()
+            QMessageBox.information(self, "Availability Updated", f"Forced {changed} parts to Available.")
+        else:
+            QMessageBox.information(self, "Availability Updated", "All parts were already marked Available.")
+        self.refresh_table()
+
+
 class SettingsDialog(QDialog):
     config_saved = pyqtSignal()
+    availability_changed = pyqtSignal()
 
     FIELD_GROUPS = (
         (
@@ -1562,6 +1965,9 @@ class SettingsDialog(QDialog):
         form_stack.addStretch(1)
 
         actions = QHBoxLayout()
+        availability_button = QPushButton("Manage Availability")
+        availability_button.clicked.connect(self.open_availability_dialog)
+        actions.addWidget(availability_button)
         actions.addStretch(1)
         cancel_button = QPushButton("Cancel")
         cancel_button.clicked.connect(self.reject)
@@ -1614,6 +2020,11 @@ class SettingsDialog(QDialog):
         if led_controller is not None and hasattr(led_controller, "reconnect"):
             led_controller.reconnect()
 
+    def open_availability_dialog(self):
+        dialog = AvailabilityManagerDialog(self.backend, self)
+        dialog.availability_changed.connect(self.availability_changed.emit)
+        dialog.exec()
+
 
 class BomStatusItemDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
@@ -1657,13 +2068,14 @@ class BomStatusItemDelegate(QStyledItemDelegate):
 
 
 class BarcodeScanDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, backend, parent=None):
         super().__init__(parent)
+        self.backend = backend
         self.setObjectName("barcodeDialog")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setWindowTitle("Scan Barcode")
         self.setModal(True)
-        self.resize(480, 280)
+        self.resize(560, 380)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)
@@ -1680,7 +2092,7 @@ class BarcodeScanDialog(QDialog):
         title.setObjectName("pageTitle")
         panel_layout.addWidget(title)
 
-        hint = QLabel("Paste or scan the barcode payload, then set the low stock threshold for the new part.")
+        hint = QLabel("Paste or scan the barcode payload, set the low stock threshold, then choose whether the part goes to a vial, an automatic type-based bin, or a specific shared bin.")
         hint.setObjectName("barcodeHint")
         hint.setWordWrap(True)
         panel_layout.addWidget(hint)
@@ -1693,11 +2105,35 @@ class BarcodeScanDialog(QDialog):
         self.barcode_input.setMinimumHeight(96)
         self.low_stock_input = QLineEdit()
         self.low_stock_input.setPlaceholderText("Required")
+        self.storage_type_input = QComboBox()
+        self.storage_type_input.addItem("Auto Vial", AddPartPage.STORAGE_MODE_AUTO)
+        self.storage_type_input.addItem("Auto Bin", AddPartPage.STORAGE_MODE_AUTO_BIN)
+        self.storage_type_input.addItem("Shared Bin", AddPartPage.STORAGE_MODE_BIN)
+        self.storage_type_input.addItem("Manual Location", AddPartPage.STORAGE_MODE_MANUAL)
+        self.auto_location_input = QLineEdit()
+        self.auto_location_input.setReadOnly(True)
+        self.auto_location_input.setText("Next available vial will be assigned automatically")
+        self.auto_bin_input = QLineEdit()
+        self.auto_bin_input.setReadOnly(True)
+        self.auto_bin_input.setText("Assigned automatically from the resolved part type")
+        self.bin_input = QComboBox()
+        populate_bin_combo(self.bin_input, self.backend)
+        self.location_input = QLineEdit()
+        self.location_input.setPlaceholderText("Example: 3A")
+        self.location_stack = QStackedWidget()
+        self.location_stack.addWidget(self.auto_location_input)
+        self.location_stack.addWidget(self.auto_bin_input)
+        self.location_stack.addWidget(self.bin_input)
+        self.location_stack.addWidget(self.location_input)
 
         form.addWidget(QLabel("Barcode"), 0, 0, alignment=Qt.AlignmentFlag.AlignTop)
         form.addWidget(self.barcode_input, 0, 1)
         form.addWidget(QLabel("Low Stock"), 1, 0)
         form.addWidget(self.low_stock_input, 1, 1)
+        form.addWidget(QLabel("Storage"), 2, 0)
+        form.addWidget(self.storage_type_input, 2, 1)
+        form.addWidget(QLabel("Location"), 3, 0)
+        form.addWidget(self.location_stack, 3, 1)
         panel_layout.addLayout(form)
 
         actions = QHBoxLayout()
@@ -1712,7 +2148,20 @@ class BarcodeScanDialog(QDialog):
 
         self.barcode_input.submitRequested.connect(self.validate_and_accept)
         self.low_stock_input.returnPressed.connect(self.validate_and_accept)
+        self.storage_type_input.currentIndexChanged.connect(self.update_storage_mode)
+        self.update_storage_mode()
         self.barcode_input.setFocus()
+
+    def update_storage_mode(self):
+        mode = self.storage_type_input.currentData()
+        if mode == AddPartPage.STORAGE_MODE_AUTO_BIN:
+            self.location_stack.setCurrentWidget(self.auto_bin_input)
+        elif mode == AddPartPage.STORAGE_MODE_BIN:
+            self.location_stack.setCurrentWidget(self.bin_input)
+        elif mode == AddPartPage.STORAGE_MODE_MANUAL:
+            self.location_stack.setCurrentWidget(self.location_input)
+        else:
+            self.location_stack.setCurrentWidget(self.auto_location_input)
 
     def validate_and_accept(self):
         barcode = self.barcode_input.toPlainText().strip()
@@ -1725,10 +2174,29 @@ class BarcodeScanDialog(QDialog):
         except ValueError:
             QMessageBox.warning(self, "Invalid Low Stock", "Low Stock must be an integer.")
             return
+        storage_mode = self.storage_type_input.currentData()
+        if storage_mode == AddPartPage.STORAGE_MODE_BIN and not self.bin_input.currentText().strip():
+            QMessageBox.warning(self, "Missing Bin", "Select a bin for this component.")
+            return
+        if storage_mode == AddPartPage.STORAGE_MODE_MANUAL and not self.location_input.text().strip():
+            QMessageBox.warning(self, "Missing Location", "Enter a manual location or switch to Auto Vial.")
+            return
         self.accept()
 
     def values(self):
-        return self.barcode_input.toPlainText().strip(), int(self.low_stock_input.text().strip())
+        storage_mode = self.storage_type_input.currentData()
+        if storage_mode == AddPartPage.STORAGE_MODE_BIN:
+            storage_location = str(self.bin_input.currentData() or "").strip()
+        elif storage_mode == AddPartPage.STORAGE_MODE_MANUAL:
+            storage_location = self.location_input.text().strip()
+        else:
+            storage_location = "N/A"
+        return (
+            self.barcode_input.toPlainText().strip(),
+            int(self.low_stock_input.text().strip()),
+            storage_mode,
+            storage_location,
+        )
 
 
 class SubmitTextEdit(QTextEdit):
@@ -1743,13 +2211,14 @@ class SubmitTextEdit(QTextEdit):
 
 
 class BulkBarcodeDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, backend, parent=None):
         super().__init__(parent)
+        self.backend = backend
         self.setObjectName("bulkBarcodeDialog")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setWindowTitle("Bulk Scan")
         self.setModal(True)
-        self.resize(760, 520)
+        self.resize(820, 620)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)
@@ -1766,10 +2235,39 @@ class BulkBarcodeDialog(QDialog):
         title.setObjectName("pageTitle")
         panel_layout.addWidget(title)
 
-        hint = QLabel("Enter one barcode and one low stock threshold per row. Empty rows are ignored.")
+        hint = QLabel("Enter one barcode and one low stock threshold per row. Choose the storage mode for this batch. Empty rows are ignored.")
         hint.setObjectName("barcodeHint")
         hint.setWordWrap(True)
         panel_layout.addWidget(hint)
+
+        storage_form = QGridLayout()
+        storage_form.setHorizontalSpacing(12)
+        storage_form.setVerticalSpacing(10)
+        self.storage_type_input = QComboBox()
+        self.storage_type_input.addItem("Auto Vial", AddPartPage.STORAGE_MODE_AUTO)
+        self.storage_type_input.addItem("Auto Bin", AddPartPage.STORAGE_MODE_AUTO_BIN)
+        self.storage_type_input.addItem("Shared Bin", AddPartPage.STORAGE_MODE_BIN)
+        self.storage_type_input.addItem("Manual Location", AddPartPage.STORAGE_MODE_MANUAL)
+        self.auto_location_input = QLineEdit()
+        self.auto_location_input.setReadOnly(True)
+        self.auto_location_input.setText("All scanned parts will use automatic vial assignment")
+        self.auto_bin_input = QLineEdit()
+        self.auto_bin_input.setReadOnly(True)
+        self.auto_bin_input.setText("Each scanned part will be assigned from its resolved part type")
+        self.bin_input = QComboBox()
+        populate_bin_combo(self.bin_input, self.backend)
+        self.location_input = QLineEdit()
+        self.location_input.setPlaceholderText("Example: 3A")
+        self.location_stack = QStackedWidget()
+        self.location_stack.addWidget(self.auto_location_input)
+        self.location_stack.addWidget(self.auto_bin_input)
+        self.location_stack.addWidget(self.bin_input)
+        self.location_stack.addWidget(self.location_input)
+        storage_form.addWidget(QLabel("Batch Storage"), 0, 0)
+        storage_form.addWidget(self.storage_type_input, 0, 1)
+        storage_form.addWidget(QLabel("Location"), 1, 0)
+        storage_form.addWidget(self.location_stack, 1, 1)
+        panel_layout.addLayout(storage_form)
 
         toolbar = QHBoxLayout()
         add_row_button = QPushButton("Add Row")
@@ -1801,10 +2299,23 @@ class BulkBarcodeDialog(QDialog):
         actions.addWidget(process_button)
         panel_layout.addLayout(actions)
 
+        self.storage_type_input.currentIndexChanged.connect(self.update_storage_mode)
         for _ in range(5):
             self.add_row()
+        self.update_storage_mode()
         self.table.setCurrentCell(0, 0)
         self.table.editItem(self.table.item(0, 0))
+
+    def update_storage_mode(self):
+        mode = self.storage_type_input.currentData()
+        if mode == AddPartPage.STORAGE_MODE_AUTO_BIN:
+            self.location_stack.setCurrentWidget(self.auto_bin_input)
+        elif mode == AddPartPage.STORAGE_MODE_BIN:
+            self.location_stack.setCurrentWidget(self.bin_input)
+        elif mode == AddPartPage.STORAGE_MODE_MANUAL:
+            self.location_stack.setCurrentWidget(self.location_input)
+        else:
+            self.location_stack.setCurrentWidget(self.auto_location_input)
 
     def add_row(self):
         row = self.table.rowCount()
@@ -1823,6 +2334,20 @@ class BulkBarcodeDialog(QDialog):
 
     def validate_and_accept(self):
         parsed_entries = []
+        storage_mode = self.storage_type_input.currentData()
+        if storage_mode == AddPartPage.STORAGE_MODE_BIN:
+            storage_location = str(self.bin_input.currentData() or "").strip()
+            if not storage_location:
+                QMessageBox.warning(self, "Missing Bin", "Select a bin for this batch.")
+                return
+        elif storage_mode == AddPartPage.STORAGE_MODE_MANUAL:
+            storage_location = self.location_input.text().strip()
+            if not storage_location:
+                QMessageBox.warning(self, "Missing Location", "Enter a manual location or switch to Auto Vial.")
+                return
+        else:
+            storage_location = "N/A"
+
         for row in range(self.table.rowCount()):
             barcode_item = self.table.item(row, 0)
             low_stock_item = self.table.item(row, 1)
@@ -1838,10 +2363,25 @@ class BulkBarcodeDialog(QDialog):
             except ValueError:
                 QMessageBox.warning(self, "Invalid Low Stock", f"Row {row + 1} must have an integer low stock value.")
                 return
-            parsed_entries.append({"barcode": barcode, "low_stock": low_stock})
+            parsed_entries.append(
+                {
+                    "barcode": barcode,
+                    "low_stock": low_stock,
+                    "storage_mode": storage_mode,
+                    "storage_location": storage_location,
+                }
+            )
 
         if not parsed_entries:
             QMessageBox.warning(self, "No Entries", "Enter at least one barcode row to process.")
+            return
+
+        if storage_mode == AddPartPage.STORAGE_MODE_MANUAL and len(parsed_entries) > 1:
+            QMessageBox.warning(
+                self,
+                "Manual Location Not Allowed",
+                "Manual Location can only be used with a single bulk-scan row. Use Auto Vial or Shared Bin for multi-row batches.",
+            )
             return
 
         self._entries = parsed_entries
@@ -2039,6 +2579,7 @@ class BomCheckinPreviewDialog(QDialog):
         super().__init__(parent)
         self.backend = backend
         self.bom_list = bom_list
+        self.led_controller = getattr(backend, "ledControl", None)
         self.setObjectName("bomDialog")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
@@ -2128,6 +2669,31 @@ class BomCheckinPreviewDialog(QDialog):
             spin = QSpinBox()
             spin.setMinimum(0)
             spin.setMaximum(999999)
+            spin.setStyleSheet(
+                """
+                QSpinBox {
+                    background: #ffffff;
+                    color: #20242b;
+                    border: 1px solid #c8ced6;
+                    border-radius: 4px;
+                    padding: 6px 26px 6px 8px;
+                    selection-background-color: #d8eee8;
+                    selection-color: #20242b;
+                }
+                QSpinBox::up-button, QSpinBox::down-button {
+                    background: #ffffff;
+                    border: none;
+                    width: 18px;
+                }
+                QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+                    background: #f3f5f7;
+                }
+                QSpinBox::up-arrow, QSpinBox::down-arrow {
+                    width: 9px;
+                    height: 9px;
+                }
+                """
+            )
             self.table.setCellWidget(row_index, 5, spin)
 
     def process_bom(self):
@@ -2136,10 +2702,69 @@ class BomCheckinPreviewDialog(QDialog):
             spin = self.table.cellWidget(row_index, 5)
             additional_usage[row.get("digikey", "")] = spin.value() if spin else 0
 
+        self._guide_component_returns()
         results = self.backend.process_returned_vials(self.bom_list, additional_usage)
         self.processed.emit()
         BomResultsDialog("BOM Return Results", results, self).exec()
         self.accept()
+
+    def reject(self):
+        self._turn_off_all_leds()
+        super().reject()
+
+    def _guide_component_returns(self):
+        for row in self.bom_list:
+            if not row.get("found"):
+                continue
+
+            location = str(row.get("location") or "").strip()
+            if not location or location.upper() == "N/A":
+                continue
+
+            part_number = str(row.get("digikey") or "this part").strip()
+            led_enabled = self._leds_connected() and self._supports_led_location(location)
+            if led_enabled and self.led_controller is not None and hasattr(self.led_controller, "highlight_location"):
+                self.led_controller.highlight_location(location)
+
+            message = f"Return {part_number} to location {location}, then press OK."
+            dialog = CheckoutActionDialog(
+                "Return Component",
+                message,
+                "Component Returned",
+                self,
+            )
+            dialog.exec()
+            self._turn_off_location_led(location)
+
+        self._turn_off_all_leds()
+
+    def _turn_off_location_led(self, location):
+        if self.led_controller is None or not location:
+            return
+        if self._supports_led_location(location) and hasattr(self.led_controller, "turn_off_led"):
+            self.led_controller.turn_off_led(location)
+            return
+        if hasattr(self.led_controller, "turn_off_recent"):
+            self.led_controller.turn_off_recent()
+
+    def _turn_off_all_leds(self):
+        if self.led_controller is not None and hasattr(self.led_controller, "turn_off_all"):
+            self.led_controller.turn_off_all()
+
+    def _leds_connected(self):
+        if self.led_controller is None:
+            return False
+        if hasattr(self.led_controller, "is_connected"):
+            try:
+                return bool(self.led_controller.is_connected())
+            except Exception:
+                return False
+        return False
+
+    def _supports_led_location(self, location):
+        row_part = "".join(filter(str.isdigit, str(location or "")))
+        col_part = "".join(filter(str.isalpha, str(location or "")))
+        return bool(row_part and len(col_part) == 1)
 
 
 class BomResultsDialog(QDialog):
@@ -2528,6 +3153,12 @@ class ComponentDetailsDialog(QDialog):
             self.highlight_button.setChecked(False)
             self.highlight_button.blockSignals(False)
             return
+        if checked and not self._supports_led_location():
+            QMessageBox.information(self, "Highlight Unavailable", "Highlight is only available for vial locations on the LED grid.")
+            self.highlight_button.blockSignals(True)
+            self.highlight_button.setChecked(False)
+            self.highlight_button.blockSignals(False)
+            return
         self._apply_led_state()
 
     def checkout_component(self):
@@ -2673,6 +3304,14 @@ class ComponentDetailsDialog(QDialog):
     def _has_valid_location(self):
         location = self._current_location()
         return bool(location and location.upper() != "N/A")
+
+    def _supports_led_location(self):
+        location = self._current_location()
+        if not location or location.upper() == "N/A":
+            return False
+        row_part = "".join(filter(str.isdigit, location))
+        col_part = "".join(filter(str.isalpha, location))
+        return bool(row_part and len(col_part) == 1)
 
     def _turn_on_led(self, location):
         if self.led_controller is None or not location or location.upper() == "N/A":
