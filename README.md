@@ -1,65 +1,72 @@
 # L.E.A.D.
-The LED Enabled Automated Database is an electronics sorting program that integrates with the DigiKey API to allow you to quickly scan or manually add components to your system. As well as led integration to allow you to create physical location indicators.
 
-# Brief Overview
-L.E.A.D. is a free, open source project designed to simplify the management of electronic component inventories. By seamlessly integrating the Digikey API, L.E.A.D. automatically fetches up-to-date component details, so you don't have to spend hours entering data manually. With its built-in LED-based visual tracking, locating parts in your storage becomes as simple as a glance. Developed with a focus on minimal setup and maximum flexibility, L.E.A.D. is perfect for makers, hobbyists, and professionals who want a hassle-free, community-driven solution for their inventory challenges. Contributions and customizations are warmly welcomed as the project evolves.
+L.E.A.D. is an electronics inventory application with DigiKey lookup, BOM workflows, barcode scanning, and LED-guided part location.
 
-# Features
-+ Digikey API Search
-+ Component Cataloguing
-+ Component Search
-+ Physical output to integrate into physical location tracking
-+ Barcode Scanning
+The current desktop app is built with `PyQt6`. The older Tkinter UI is no longer the active frontend.
 
-# How It Works
-## Google Web App & DigiKey API Integration
-The system interfaces with DigiKey’s API via a Google Web App. When a user inputs a part number, L.E.A.D. sends a request to the Google Web App, which acts as a bridge between the software and DigiKey's API. The response includes detailed product information such as pricing, stock availability, manufacturer details, and datasheets. This data is then stored in the component catalog for future reference.
+## Current Features
 
-## Barcode Parsing & Manual Entry
-The system supports barcode scanning to quickly decode component information. The barcode decoder extracts part numbers and quantities, which are then verified against the existing database. If a part is not found in DigiKey’s database, users are given the option to manually add it. The system also automatically assigns storage locations for newly added parts.
+- DigiKey part lookup
+- Manual part entry and editing
+- Part detail popup with checkout and highlight actions
+- Barcode scan and bulk scan flows
+- BOM import, preview, check-in, and checkout
+- LED-guided location highlighting for single parts and BOM checkout
+- Low-stock export
+- In-app settings for DigiKey, serial, and file paths
+- Test mode support
 
-## LED-Based Location Identification
-Each component is assigned a unique location code within the storage system. A custom LED control system communicates with an Arduino to illuminate the corresponding LED, visually guiding users to the exact location of a part. When a component is checked out, the system prompts the user to confirm its retrieval and turns off the LED once the part is replaced.
+## Project Layout
 
-## Automated Inventory Management
-The backend system maintains a component catalog in JSON format, logging stock levels, part numbers, and locations.
-A low-stock alert system identifies components that are running low and flags them in the user interface.
-A Bill of Materials (BOM) processing feature allows users to import BOM files, checking part availability and automatically updating stock levels.
-User Interface & Control
+- [main.py](/c:/Users/ginoc/OneDrive/Desktop/L.E.A.D/main.py): Qt application entrypoint
+- [frontend.py](/c:/Users/ginoc/OneDrive/Desktop/L.E.A.D/frontend.py): Qt UI
+- [backend.py](/c:/Users/ginoc/OneDrive/Desktop/L.E.A.D/backend.py): inventory and BOM logic
+- [digikey_api_local.py](/c:/Users/ginoc/OneDrive/Desktop/L.E.A.D/digikey_api_local.py): DigiKey API client
+- [ledSerial.py](/c:/Users/ginoc/OneDrive/Desktop/L.E.A.D/ledSerial.py): serial LED controller
+- [file_initializer.py](/c:/Users/ginoc/OneDrive/Desktop/L.E.A.D/file_initializer.py): config and runtime file setup
+- [image_cache.py](/c:/Users/ginoc/OneDrive/Desktop/L.E.A.D/image_cache.py): cached DigiKey image storage
 
-The frontend is built using Tkinter, providing an intuitive UI for searching, adding, and managing components.
-A search function enables users to filter parts by part number, location, or type.
-Bulk operations allow for scanning and adding multiple parts at once.
+## Requirements
 
-# Setup
-This guide will walk you through downloading the code from GitHub, setting up a Google Apps Script for API communication, getting a DigiKey API key, and configuring the config file to link everything together.
+- Python 3.10+
+- Dependencies from `requirements.txt`
 
-## Downloading and Running Program
-This is a basic overview on downloading and running the program. This is for beginners feel free to ignore.
+Install dependencies:
 
-### Dowloading From GitHub
-1. Click on the Code button near the top right of the page
-2. Select Download zip
-3. Extract the zip file
-4. Run the main file to start the program
+```powershell
+pip install -r requirements.txt
+```
 
-## Digikey API
-To interact with DigiKey's API, you need an API key.
+## Running
 
-### Steps to Obtain a DigiKey API Key:
-Create a DigiKey Developer Account:
+```powershell
+python main.py
+```
 
-1. Go to DigiKey [API Portal](https://developer.digikey.com)
-2. Sign in or create an account.
-#### Register for API Access:
-1. Navigate to Organizations
-2. Create new organization and name it
-3. Next select "Create New Production App"
-4. Name you App and enable "ProductInformation V4"
-5. Save and go to view tab here you will find your Client Id and Client Secret. Save these as they are needed for the config file
+On first startup the app creates its runtime files under `Databases/` if they do not already exist, then opens the settings dialog so you can fill in configuration values.
 
-# Using L.E.A.D.
-After opening the program you are left on a main menu page that lists types of components in the system. As well as any that have reached low stock. Your main navigation is throught the navigation button at the top left, the Add menu allows you to manually add components and they're data. Alternatively you can scan in a barcode. The search menu is fairly self explanitory. In the add and search menues you can double click to ecit or highlight a component.
+## Configuration
 
+Use the gear button in the app sidebar to edit configuration.
 
+Config sections:
 
+- `API`
+  - `DIGIKEY_CLIENT_ID`
+  - `DIGIKEY_CLIENT_SECRET`
+- `SERIAL`
+  - `PORT`
+  - `BAUDRATE`
+  - `TIMEOUT`
+- `FILES`
+  - `COMPONENT_CATALOGUE`
+  - `CHANGELOG`
+  - `IMAGE_CACHE`
+
+Blank file paths fall back to the default files under `Databases/`.
+
+## Notes
+
+- If the LED hardware is disconnected, the app should stay usable and report that state in the UI instead of crashing.
+- DigiKey image responses are cached in a local SQLite database.
+- Runtime data under `Databases/` is ignored by git.
