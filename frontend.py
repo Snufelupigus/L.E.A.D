@@ -43,6 +43,24 @@ BOM_ROW_BACKGROUND_ROLE = Qt.ItemDataRole.UserRole + 1
 BOM_ROW_FOREGROUND_ROLE = Qt.ItemDataRole.UserRole + 2
 
 
+def set_primary_action(button):
+    if button is None:
+        return None
+    button.setDefault(True)
+    button.setAutoDefault(True)
+    return button
+
+
+def install_accept_shortcuts(dialog, callback):
+    shortcuts = []
+    for sequence in ("Return", "Enter"):
+        shortcut = QShortcut(QKeySequence(sequence), dialog)
+        shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        shortcut.activated.connect(callback)
+        shortcuts.append(shortcut)
+    dialog._accept_shortcuts = shortcuts
+
+
 def populate_bin_combo(combo_box, backend, selected_location=None):
     selected = str(selected_location or "").strip()
     get_bins = getattr(backend, "get_bin_locations", lambda: [])
@@ -1756,6 +1774,7 @@ class HelpDialog(QDialog):
         actions.addStretch(1)
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.accept)
+        set_primary_action(close_button)
         actions.addWidget(close_button)
         panel_layout.addLayout(actions)
 
@@ -1814,6 +1833,7 @@ class AvailabilityManagerDialog(QDialog):
         force_all_button.clicked.connect(self.force_all_available)
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.accept)
+        set_primary_action(close_button)
         actions.addWidget(force_all_button)
         actions.addWidget(close_button)
         panel_layout.addLayout(actions)
@@ -1971,11 +1991,13 @@ class SettingsDialog(QDialog):
         actions.addStretch(1)
         cancel_button = QPushButton("Cancel")
         cancel_button.clicked.connect(self.reject)
-        save_button = QPushButton("Save Settings")
-        save_button.clicked.connect(self.save_settings)
+        self.save_button = QPushButton("Save Settings")
+        self.save_button.clicked.connect(self.save_settings)
+        set_primary_action(self.save_button)
         actions.addWidget(cancel_button)
-        actions.addWidget(save_button)
+        actions.addWidget(self.save_button)
         panel_layout.addLayout(actions)
+        install_accept_shortcuts(self, self.save_settings)
 
     def save_settings(self):
         config = self.initializer.load_config()
@@ -2142,12 +2164,14 @@ class BarcodeScanDialog(QDialog):
         cancel_button.clicked.connect(self.reject)
         process_button = QPushButton("Process")
         process_button.clicked.connect(self.validate_and_accept)
+        set_primary_action(process_button)
         actions.addWidget(cancel_button)
         actions.addWidget(process_button)
         panel_layout.addLayout(actions)
 
         self.barcode_input.submitRequested.connect(self.validate_and_accept)
         self.low_stock_input.returnPressed.connect(self.validate_and_accept)
+        self.location_input.returnPressed.connect(self.validate_and_accept)
         self.storage_type_input.currentIndexChanged.connect(self.update_storage_mode)
         self.update_storage_mode()
         self.barcode_input.setFocus()
@@ -2295,6 +2319,7 @@ class BulkBarcodeDialog(QDialog):
         cancel_button.clicked.connect(self.reject)
         process_button = QPushButton("Process All")
         process_button.clicked.connect(self.validate_and_accept)
+        set_primary_action(process_button)
         actions.addWidget(cancel_button)
         actions.addWidget(process_button)
         panel_layout.addLayout(actions)
@@ -2305,6 +2330,7 @@ class BulkBarcodeDialog(QDialog):
         self.update_storage_mode()
         self.table.setCurrentCell(0, 0)
         self.table.editItem(self.table.item(0, 0))
+        self.location_input.returnPressed.connect(self.validate_and_accept)
 
     def update_storage_mode(self):
         mode = self.storage_type_input.currentData()
@@ -2461,11 +2487,13 @@ class BomCheckoutPreviewDialog(QDialog):
         actions.addStretch(1)
         cancel_button = QPushButton("Close")
         cancel_button.clicked.connect(self.reject)
-        process_button = QPushButton("Consume Components")
-        process_button.clicked.connect(self.process_bom)
+        self.process_button = QPushButton("Consume Components")
+        self.process_button.clicked.connect(self.process_bom)
+        set_primary_action(self.process_button)
         actions.addWidget(cancel_button)
-        actions.addWidget(process_button)
+        actions.addWidget(self.process_button)
         panel_layout.addLayout(actions)
+        install_accept_shortcuts(self, self.process_bom)
 
         self.populate_rows()
         self.table.currentCellChanged.connect(lambda *_: self.highlight_selected_location())
@@ -2641,11 +2669,13 @@ class BomCheckinPreviewDialog(QDialog):
         actions.addStretch(1)
         cancel_button = QPushButton("Close")
         cancel_button.clicked.connect(self.reject)
-        process_button = QPushButton("Return Components")
-        process_button.clicked.connect(self.process_bom)
+        self.process_button = QPushButton("Return Components")
+        self.process_button.clicked.connect(self.process_bom)
+        set_primary_action(self.process_button)
         actions.addWidget(cancel_button)
-        actions.addWidget(process_button)
+        actions.addWidget(self.process_button)
         panel_layout.addLayout(actions)
+        install_accept_shortcuts(self, self.process_bom)
 
         self.populate_rows()
 
@@ -2819,8 +2849,10 @@ class BomResultsDialog(QDialog):
         actions.addStretch(1)
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.accept)
+        set_primary_action(close_button)
         actions.addWidget(close_button)
         panel_layout.addLayout(actions)
+        install_accept_shortcuts(self, self.accept)
 
 
 class QuantityPromptDialog(QDialog):
@@ -2859,6 +2891,8 @@ class QuantityPromptDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
+        ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        set_primary_action(ok_button)
         buttons.accepted.connect(self.validate_and_accept)
         buttons.rejected.connect(self.reject)
         panel_layout.addWidget(buttons)
@@ -2915,10 +2949,10 @@ class CheckoutActionDialog(QDialog):
         ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
         if ok_button is not None:
             ok_button.setText(button_text)
-            ok_button.setDefault(True)
-            ok_button.setAutoDefault(True)
+            set_primary_action(ok_button)
         buttons.accepted.connect(self.accept)
         panel_layout.addWidget(buttons)
+        install_accept_shortcuts(self, self.accept)
 
 
 class ComponentDetailsDialog(QDialog):
@@ -3049,8 +3083,14 @@ class ComponentDetailsDialog(QDialog):
         links.addWidget(self.save_button)
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.accept)
+        set_primary_action(close_button)
         links.addWidget(close_button)
         layout.addLayout(links)
+
+        for editor in self.part_info_editors.values():
+            editor.returnPressed.connect(self._handle_editor_return)
+        for editor in self.metadata_editors.values():
+            editor.returnPressed.connect(self._handle_editor_return)
 
         self.populate_from_component(self.component)
 
@@ -3125,6 +3165,8 @@ class ComponentDetailsDialog(QDialog):
         self._set_editor_readonly(self.description_value, not enabled)
         self.save_button.setVisible(enabled)
         self.edit_button.setVisible(not enabled)
+        if enabled:
+            set_primary_action(self.save_button)
 
     def save_changes(self):
         updated_component = self._collect_component_data()
@@ -3145,6 +3187,10 @@ class ComponentDetailsDialog(QDialog):
         self.source_component = self.backend.get_all_components()[component_index]
         self.populate_from_component(self.source_component)
         self.saved.emit()
+
+    def _handle_editor_return(self):
+        if self.edit_mode:
+            self.save_changes()
 
     def toggle_highlight(self, checked):
         if checked and not self._has_valid_location():
