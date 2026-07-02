@@ -334,15 +334,32 @@ class Backend:
             raise ValueError("Invalid barcode format")
 
         remaining = barcode[6:]
+        header_match = re.search(r"^(?P<part>.+)1P(?P<manufacturer>.+)30P(?P=part)", remaining)
+        if header_match:
+            part_number = header_match.group("part").strip()
+            manufacturer_number = header_match.group("manufacturer").strip()
+            suffix = remaining[header_match.end() :]
+        else:
+            prefix, separator, suffix = remaining.partition("30P")
+            if not separator:
+                raise ValueError("Barcode is missing the 30P manufacturer separator.")
 
-        part_number = remaining.split("1P")
-        manufacturer_number = part_number[1].split("30P")
-        manufacturer_number = manufacturer_number[0]
-        count = part_number[1].split("4L")
-        part_number = part_number[0]
-        count = count[1].split("Q")
-        count = count[1].split("11Z")
-        count = count[0]
+            split_index = prefix.rfind("1P")
+            if split_index < 0:
+                raise ValueError("Barcode is missing the 1P part/manufacturer separator.")
+
+            part_number = prefix[:split_index].strip()
+            manufacturer_number = prefix[split_index + 2 :].strip()
+
+        count_matches = re.findall(r"Q(\d+)11Z", suffix)
+        if not count_matches:
+            count_matches = re.findall(r"Q(\d+)11Z", remaining)
+        if not count_matches:
+            raise ValueError("Barcode is missing the quantity field.")
+        count = count_matches[-1]
+
+        if not part_number or not manufacturer_number:
+            raise ValueError("Barcode is missing part or manufacturer data.")
 
         parsed_data = {
             "part_number": part_number,
