@@ -15,6 +15,7 @@ The current desktop app is built with `PyQt6`. The older Tkinter UI is no longer
 - Low-stock export
 - In-app settings for DigiKey, serial, and file paths
 - Test mode support
+- Configurable active LED count for the Arduino strip controller
 
 ## Project Layout
 
@@ -23,6 +24,7 @@ The current desktop app is built with `PyQt6`. The older Tkinter UI is no longer
 - [backend.py](/c:/Users/ginoc/OneDrive/Desktop/L.E.A.D/backend.py): inventory and BOM logic
 - [digikey_api_local.py](/c:/Users/ginoc/OneDrive/Desktop/L.E.A.D/digikey_api_local.py): DigiKey API client
 - [ledSerial.py](/c:/Users/ginoc/OneDrive/Desktop/L.E.A.D/ledSerial.py): serial LED controller
+- [arduino/lead_led_controller/lead_led_controller.ino](/c:/Users/ginoc/OneDrive/Desktop/L.E.A.D/arduino/lead_led_controller/lead_led_controller.ino): Arduino firmware for the LED strip controller
 - [file_initializer.py](/c:/Users/ginoc/OneDrive/Desktop/L.E.A.D/file_initializer.py): config and runtime file setup
 - [image_cache.py](/c:/Users/ginoc/OneDrive/Desktop/L.E.A.D/image_cache.py): cached DigiKey image storage
 
@@ -58,12 +60,19 @@ Config sections:
   - `PORT`
   - `BAUDRATE`
   - `TIMEOUT`
+  - `LED_COUNT`
 - `FILES`
   - `COMPONENT_CATALOGUE`
   - `CHANGELOG`
   - `IMAGE_CACHE`
 
 Blank file paths fall back to the default files under `Databases/`.
+
+For LED hardware:
+
+- `LED_COUNT` controls how many LEDs the desktop app actively manages.
+- The bundled Arduino sketch supports up to `260` LEDs and persists the active count set by the app.
+- If `LED_COUNT` is left blank, the app defaults to `104`.
 
 ## Notes
 

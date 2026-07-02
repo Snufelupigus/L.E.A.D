@@ -1908,6 +1908,7 @@ class SettingsDialog(QDialog):
                 ("PORT", "Serial Port"),
                 ("BAUDRATE", "Baud Rate"),
                 ("TIMEOUT", "Timeout"),
+                ("LED_COUNT", "LED Count"),
             ),
         ),
         (
@@ -1948,7 +1949,7 @@ class SettingsDialog(QDialog):
         title.setObjectName("pageTitle")
         panel_layout.addWidget(title)
 
-        hint = QLabel("Edit the application configuration here. Blank file paths fall back to the default Databases folder.")
+        hint = QLabel("Edit the application configuration here. Blank file paths fall back to the default Databases folder. Leave LED Count blank to use the default 104 LEDs.")
         hint.setObjectName("barcodeHint")
         hint.setWordWrap(True)
         panel_layout.addWidget(hint)
@@ -2018,12 +2019,20 @@ class SettingsDialog(QDialog):
     def _validate_numeric(self, config):
         baudrate = str(config.get("SERIAL", {}).get("BAUDRATE", "")).strip()
         timeout = str(config.get("SERIAL", {}).get("TIMEOUT", "")).strip()
+        led_count = str(config.get("SERIAL", {}).get("LED_COUNT", "")).strip()
         if baudrate and not baudrate.isdigit():
             QMessageBox.warning(self, "Invalid Baud Rate", "Baud Rate must be blank or an integer.")
             return False
         if timeout and not timeout.isdigit():
             QMessageBox.warning(self, "Invalid Timeout", "Timeout must be blank or an integer.")
             return False
+        if led_count:
+            if not led_count.isdigit():
+                QMessageBox.warning(self, "Invalid LED Count", "LED Count must be blank or a positive integer.")
+                return False
+            if int(led_count) <= 0:
+                QMessageBox.warning(self, "Invalid LED Count", "LED Count must be greater than zero.")
+                return False
         return True
 
     def _apply_runtime_settings(self, config):

@@ -9,10 +9,12 @@ from threading import Lock
 logger = logging.getLogger(__name__)
 
 class LedController:
+    DEFAULT_LED_COUNT = 104
+
     def __init__(self, show_errors=True, error_reporter=None):
         self.show_errors = show_errors
         self.error_reporter = error_reporter
-        self.num_leds = 104
+        self.num_leds = self.DEFAULT_LED_COUNT
         self.recent_leds = set()
         self._req_id = 0
         self.ser = None
@@ -20,6 +22,7 @@ class LedController:
         self.baudrate = 9600
         self.timeout = 1
         self.last_error = ""
+        self.supports_extended_protocol = False
 
         # Protect set mutations across threads
         self._req_lock = threading.Lock()   # for highlight request gating
@@ -38,14 +41,17 @@ class LedController:
                 self.port = serial_config.get("PORT", "")
                 baudrate = serial_config.get("BAUDRATE", "")
                 timeout = serial_config.get("TIMEOUT", "")
-                self.baudrate = int(baudrate) if str(baudrate).strip() else 9600
-                self.timeout = int(timeout) if str(timeout).strip() else 1
+                led_count = serial_config.get("LED_COUNT", "")
+                self.baudrate = int(baudrate) if str(baudrate).strip().isdigit() else 9600
+                self.timeout = int(timeout) if str(timeout).strip().isdigit() else 1
+                self.num_leds = int(led_count) if str(led_count).strip().isdigit() and int(led_count) > 0 else self.DEFAULT_LED_COUNT
         except Exception as e:
             logger.exception("Error loading config file: %s", e)
             self._show_error("Config Error", "Failed to load serial settings from config.json")
             self.port = ""
             self.baudrate = 9600
             self.timeout = 1
+            self.num_leds = self.DEFAULT_LED_COUNT
 
     def connect_serial(self):
         """Establish serial connection with LED controller"""
@@ -59,7 +65,10 @@ class LedController:
             if not self.port:
                 raise ValueError("Serial port not defined in config.json")
             self.ser = serial.Serial(port=self.port, baudrate=self.baudrate, timeout=self.timeout)
-            time.sleep(0.5)  # Let Arduino initialize
+            time.sleep(2.0)  # Let Arduino reset and finish bootloader startup
+            self.supports_extended_protocol = self._detect_extended_protocol()
+            if self.supports_extended_protocol:
+                self._send_text_command(f"COUNT {self.num_leds}")
             self.turn_off_all()
             self.last_error = ""
         except Exception as e:
@@ -67,6 +76,7 @@ class LedController:
             self.last_error = str(e)
             self._show_error("LED System Error", "LED Controller Failed To Load")
             self.ser = None
+            self.supports_extended_protocol = False
 
     def _show_error(self, title, message):
         if self.show_errors and self.error_reporter:
@@ -80,6 +90,7 @@ class LedController:
         except Exception:
             pass
         self.ser = None
+        self.supports_extended_protocol = False
         with self._lock:
             self.recent_leds.clear()
 
@@ -94,6 +105,9 @@ class LedController:
             self._handle_serial_error(error)
             return False
 
+    def _send_text_command(self, command):
+        return self._write_command(f"{command}\n".encode("utf-8"))
+
     def _flush_serial(self):
         if self.ser is None:
             return False
@@ -105,15 +119,44 @@ class LedController:
             self._handle_serial_error(error)
             return False
 
+    def _readline(self):
+        if self.ser is None:
+            return ""
+        try:
+            return self.ser.readline().decode("utf-8", errors="ignore").strip()
+        except Exception as error:
+            logger.warning("LED controller read failed: %s", error)
+            self._handle_serial_error(error)
+            return ""
+
+    def _detect_extended_protocol(self):
+        if self.ser is None:
+            return False
+        for _ in range(3):
+            try:
+                self.ser.reset_input_buffer()
+            except Exception:
+                pass
+            if not self._send_text_command("INFO"):
+                return False
+            if not self._flush_serial():
+                return False
+            response = self._readline()
+            if response.startswith("INFO "):
+                return True
+            time.sleep(0.2)
+        return False
+
     def is_connected(self):
         return bool(self.ser is not None and getattr(self.ser, "is_open", True))
 
     def get_status(self):
         if self.is_connected():
+            protocol = "extended" if self.supports_extended_protocol else "basic"
             return {
                 "connected": True,
                 "label": "Connected",
-                "details": f"LED controller connected on {self.port} at {self.baudrate} baud.",
+                "details": f"LED controller connected on {self.port} at {self.baudrate} baud. Active LED count: {self.num_leds}. Protocol: {protocol}.",
             }
 
         if self.port:
@@ -161,7 +204,7 @@ class LedController:
 
     def set_led_on(self, location_code, red, green, blue):
         index = self.location_to_index(location_code)
-        if index is None or self.ser is None:
+        if index is None or self.ser is None or index >= self.num_leds:
             return
         cmd = f"SET {index} {red} {green} {blue}\n".encode('utf-8')
         if not self._write_command(cmd):
@@ -193,6 +236,12 @@ class LedController:
         if self.ser is None:
             return
 
+        if self.supports_extended_protocol:
+            if self._send_text_command("CLEAR") and self._flush_serial():
+                with self._lock:
+                    self.recent_leds.clear()
+                return
+
         for i in range(self.num_leds):
             cmd = f"SET {i} 0 0 0\n".encode('utf-8')
             if not self._write_command(cmd):
@@ -205,7 +254,7 @@ class LedController:
 
     def turn_off_led(self, location_code):
         index = self.location_to_index(location_code)
-        if index is None or self.ser is None:
+        if index is None or self.ser is None or index >= self.num_leds:
             return
         cmd = f"SET {index} 0 0 0\n".encode('utf-8')
         if not self._write_command(cmd):
@@ -228,7 +277,7 @@ class LedController:
         for loc in assigned_locations:
             time.sleep(0.05)
             index = self.location_to_index(loc)
-            if index is not None:
+            if index is not None and index < self.num_leds:
                 if not self._write_command(f"SET {index} 0 0 0\n".encode('utf-8')):
                     return
                 self.recent_leds.discard(index)

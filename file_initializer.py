@@ -16,6 +16,7 @@ class FileInitializer:
             "PORT": "",
             "BAUDRATE": "",
             "TIMEOUT": "",
+            "LED_COUNT": "",
         },
         "FILES": {
             "COMPONENT_CATALOGUE": "",
