@@ -1570,13 +1570,13 @@ class AddPartPage(QWidget):
 
         is_bin = location.lower().startswith("bin ")
         if is_bin and is_duplicate:
-            message = f"Duplicate found. Please add components to {location}."
+            message = f"Duplicate found for {part_label}. Please add components to {location}."
         elif is_bin:
-            message = f"Please add the component to {location}."
+            message = f"Please add {part_label} to {location}."
         elif is_duplicate:
-            message = f"Duplicate found. Please add components to Vial {location}."
+            message = f"Duplicate found for {part_label}. Please add components to Vial {location}."
         else:
-            message = f"Please add the component to Vial {location}."
+            message = f"Please add {part_label} to Vial {location}."
 
         led_controller = getattr(self.backend, "ledControl", None)
         led_enabled = (
