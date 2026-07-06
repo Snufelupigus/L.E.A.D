@@ -1184,10 +1184,7 @@ class AddPartPage(QWidget):
                 QMessageBox.critical(self, "Barcode Add Failed", str(exc))
                 return
 
-            if add_result.get("duplicate"):
-                self._guide_duplicate_storage(add_result)
-            else:
-                QMessageBox.information(self, "Barcode Added", "The scanned part was added to the catalogue.")
+            self._guide_component_storage(add_result)
             self.clear_form()
             self.refresh()
             self.part_added.emit()
@@ -1328,10 +1325,7 @@ class AddPartPage(QWidget):
             QMessageBox.critical(self, "Save Failed", str(exc))
             return
 
-        if add_result.get("duplicate"):
-            self._guide_duplicate_storage(add_result)
-        else:
-            QMessageBox.information(self, "Part Saved", "The part was added to the catalogue.")
+        self._guide_component_storage(add_result)
         self.clear_form()
         self.refresh()
         self.part_added.emit()
@@ -1363,7 +1357,9 @@ class AddPartPage(QWidget):
             QMessageBox.warning(self, "Invalid Barcode", str(exc))
             return
 
-        if self._handle_barcode_duplicate(barcode_data):
+        duplicate_result = self._handle_barcode_duplicate(barcode_data)
+        if duplicate_result:
+            self._guide_component_storage(duplicate_result)
             self.refresh()
             self.part_added.emit()
             return
@@ -1401,6 +1397,7 @@ class AddPartPage(QWidget):
             "errors": [],
             "possible_duplicates": [],
         }
+        guidance_results = []
 
         for entry in entries:
             try:
@@ -1410,8 +1407,9 @@ class AddPartPage(QWidget):
                 continue
 
             duplicate_result = self._handle_barcode_duplicate(barcode_data, interactive=False)
-            if duplicate_result == "duplicate":
+            if isinstance(duplicate_result, dict) and duplicate_result.get("duplicate"):
                 summary["duplicates"] += 1
+                guidance_results.append(duplicate_result)
                 continue
             if duplicate_result == "possible_duplicate":
                 summary["possible_duplicates"].append(barcode_data.get("manufacturer_number", barcode_data.get("part_number", "Unknown")))
@@ -1439,13 +1437,16 @@ class AddPartPage(QWidget):
                 component_type=component.get("part_info", {}).get("type", ""),
             )
             try:
-                self.backend.add_component(component)
+                add_result = self.backend.add_component(component)
                 summary["added"] += 1
+                guidance_results.append(add_result)
             except Exception as exc:
                 summary["errors"].append(f"{barcode_data['part_number']}: {exc}")
 
         self.refresh()
         self.part_added.emit()
+        for add_result in guidance_results:
+            self._guide_component_storage(add_result)
         self._show_bulk_summary(summary)
 
     def _show_bulk_summary(self, summary):
@@ -1503,10 +1504,7 @@ class AddPartPage(QWidget):
             for component in existing_components:
                 existing = component.get("part_info", {}).get("manufacturer_number", "").strip().lower()
                 if existing == actual_match:
-                    update_result = self._increment_existing_component(component, barcode_data, "barcode exact match")
-                    if interactive:
-                        self._guide_duplicate_storage(update_result)
-                    return "duplicate"
+                    return self._increment_existing_component(component, barcode_data, "barcode exact match")
 
         close_matches = difflib.get_close_matches(new_part_number, normalized_parts, n=1, cutoff=0.8)
         if close_matches:
@@ -1523,9 +1521,7 @@ class AddPartPage(QWidget):
                 for component in existing_components:
                     existing = component.get("part_info", {}).get("manufacturer_number", "").strip().lower()
                     if existing == suggested_actual:
-                        update_result = self._increment_existing_component(component, barcode_data, "barcode fuzzy match")
-                        self._guide_duplicate_storage(update_result)
-                        return "duplicate"
+                        return self._increment_existing_component(component, barcode_data, "barcode fuzzy match")
 
         return False
 
@@ -1549,9 +1545,10 @@ class AddPartPage(QWidget):
             "new_count": new_count,
         }
 
-    def _guide_duplicate_storage(self, add_result):
+    def _guide_component_storage(self, add_result):
         location = str(add_result.get("location") or "N/A").strip()
         component = add_result.get("component", {})
+        is_duplicate = bool(add_result.get("duplicate"))
         part_info = component.get("part_info", {})
         part_label = (
             str(part_info.get("part_number") or "").strip()
@@ -1562,16 +1559,24 @@ class AddPartPage(QWidget):
         if not location or location.upper() == "N/A":
             QMessageBox.information(
                 self,
-                "Duplicate Found",
-                f"Duplicate found for {part_label}. The count was updated in the catalogue.",
+                "Duplicate Found" if is_duplicate else "Part Added",
+                (
+                    f"Duplicate found for {part_label}. The count was updated in the catalogue."
+                    if is_duplicate
+                    else f"{part_label} was added to the catalogue."
+                ),
             )
             return
 
         is_bin = location.lower().startswith("bin ")
-        if is_bin:
+        if is_bin and is_duplicate:
             message = f"Duplicate found. Please add components to {location}."
-        else:
+        elif is_bin:
+            message = f"Please add the component to {location}."
+        elif is_duplicate:
             message = f"Duplicate found. Please add components to Vial {location}."
+        else:
+            message = f"Please add the component to Vial {location}."
 
         led_controller = getattr(self.backend, "ledControl", None)
         led_enabled = (
@@ -1587,7 +1592,7 @@ class AddPartPage(QWidget):
             except Exception:
                 led_enabled = False
 
-        dialog = CheckoutActionDialog("Duplicate Found", message, "OK", self)
+        dialog = CheckoutActionDialog("Duplicate Found" if is_duplicate else "Part Added", message, "OK", self)
         dialog.exec()
 
         if led_enabled:
