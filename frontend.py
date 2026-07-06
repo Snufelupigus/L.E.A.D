@@ -35,6 +35,7 @@ from copy import deepcopy
 import difflib
 import os
 import subprocess
+import sys
 import webbrowser
 from file_initializer import FileInitializer
 from image_cache import ImageCache
@@ -2097,13 +2098,36 @@ class SettingsDialog(QDialog):
             return
 
         if "UPDATED:" in output:
-            message = "Updates were installed successfully. Restart the application to load the new version."
+            message = "Updates were installed successfully. The application will now restart."
         else:
             message = "This installation is already up to date."
 
         if output:
             message = f"{message}\n\n{output}"
         QMessageBox.information(self, "Update Check", message)
+        if "UPDATED:" in output:
+            self.restart_application()
+
+    def restart_application(self):
+        app_dir = os.path.dirname(__file__)
+        if getattr(sys, "frozen", False):
+            command = [sys.executable]
+        else:
+            command = [sys.executable, os.path.join(app_dir, "main.py")]
+
+        try:
+            subprocess.Popen(command, cwd=app_dir)
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Restart Failed",
+                f"The update was installed, but the application could not restart automatically.\n\n{exc}",
+            )
+            return
+
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
 
 class BomStatusItemDelegate(QStyledItemDelegate):

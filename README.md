@@ -58,7 +58,7 @@ The Settings dialog also includes `Check for Updates`, which runs [check_for_upd
 - fast-forwards only when the tracked worktree is clean
 - leaves ignored runtime folders such as `Databases/` and `backups/` alone
 
-After a successful update, restart the application so the new code is loaded.
+After a successful update, the app restarts automatically so the new code is loaded.
 
 Config sections:
 
