@@ -16,6 +16,7 @@ The current desktop app is built with `PyQt6`. The older Tkinter UI is no longer
 - In-app settings for DigiKey, serial, and file paths
 - Test mode support
 - Configurable active LED count for the Arduino strip controller
+- In-app Git-based update check
 
 ## Project Layout
 
@@ -50,6 +51,14 @@ On first startup the app creates its runtime files under `Databases/` if they do
 ## Configuration
 
 Use the gear button in the app sidebar to edit configuration.
+
+The Settings dialog also includes `Check for Updates`, which runs [check_for_updates.bat](/c:/Users/ginoc/OneDrive/Desktop/L.E.A.D/check_for_updates.bat) from the repo root. The updater:
+
+- fetches the current branch from `origin`
+- fast-forwards only when the tracked worktree is clean
+- leaves ignored runtime folders such as `Databases/` and `backups/` alone
+
+After a successful update, restart the application so the new code is loaded.
 
 Config sections:
 

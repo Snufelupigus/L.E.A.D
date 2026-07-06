@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (
 from copy import deepcopy
 import difflib
 import os
+import subprocess
 import webbrowser
 from file_initializer import FileInitializer
 from image_cache import ImageCache
@@ -1986,6 +1987,9 @@ class SettingsDialog(QDialog):
         form_stack.addStretch(1)
 
         actions = QHBoxLayout()
+        self.update_button = QPushButton("Check for Updates")
+        self.update_button.clicked.connect(self.run_update_check)
+        actions.addWidget(self.update_button)
         availability_button = QPushButton("Manage Availability")
         availability_button.clicked.connect(self.open_availability_dialog)
         actions.addWidget(availability_button)
@@ -2055,6 +2059,51 @@ class SettingsDialog(QDialog):
         dialog = AvailabilityManagerDialog(self.backend, self)
         dialog.availability_changed.connect(self.availability_changed.emit)
         dialog.exec()
+
+    def run_update_check(self):
+        script_path = os.path.join(os.path.dirname(__file__), "check_for_updates.bat")
+        if not os.path.exists(script_path):
+            QMessageBox.warning(self, "Updater Missing", "The update script was not found in the application folder.")
+            return
+
+        self.update_button.setEnabled(False)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            result = subprocess.run(
+                ["cmd.exe", "/c", script_path],
+                cwd=os.path.dirname(script_path),
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+        except subprocess.TimeoutExpired:
+            QMessageBox.warning(self, "Update Timeout", "The update check took too long and was stopped.")
+            return
+        except Exception as exc:
+            QMessageBox.critical(self, "Update Failed", str(exc))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+            self.update_button.setEnabled(True)
+
+        output_parts = [part.strip() for part in (result.stdout, result.stderr) if str(part or "").strip()]
+        output = "\n".join(output_parts)
+
+        if result.returncode != 0:
+            message = "The updater did not complete successfully."
+            if output:
+                message = f"{message}\n\n{output}"
+            QMessageBox.warning(self, "Update Failed", message)
+            return
+
+        if "UPDATED:" in output:
+            message = "Updates were installed successfully. Restart the application to load the new version."
+        else:
+            message = "This installation is already up to date."
+
+        if output:
+            message = f"{message}\n\n{output}"
+        QMessageBox.information(self, "Update Check", message)
 
 
 class BomStatusItemDelegate(QStyledItemDelegate):
