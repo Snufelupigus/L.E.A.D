@@ -201,6 +201,13 @@ class Backend:
         new_part_number = component["part_info"]["part_number"].strip().lower()
         new_count = int(component["part_info"].get("count", 0))
 
+        duplicate_index = None
+        for i, comp in enumerate(self.components):
+            existing_part = comp["part_info"]["part_number"].strip().lower()
+            if existing_part == new_part_number:
+                duplicate_index = i
+                break
+
         # Check the location. If it's empty or "N/A", assign a new location.
         location = component["part_info"].get("location", "").strip()
         if not location or location.upper() == "N/A":
@@ -214,18 +221,10 @@ class Backend:
             #Check for duplicate locations
             location = location.upper()
             assigned = self.get_assigned_locations()
-            if location in assigned and "bin" not in location.lower():
+            if duplicate_index is None and location in assigned and "bin" not in location.lower():
                 # Location is already taken.
                 self._notify("error", "Location Error", f"Location {location} is already assigned to another component.")
                 raise Exception(f"Location {location} is already assigned to another component.")
-        
-        # (Optional) Check for duplicates and update count if needed.
-        duplicate_index = None
-        for i, comp in enumerate(self.components):
-            existing_part = comp["part_info"]["part_number"].strip().lower()
-            if existing_part == new_part_number:
-                duplicate_index = i
-                break
 
         if duplicate_index is not None:
             existing_component = self.components[duplicate_index]
@@ -236,11 +235,26 @@ class Backend:
             updated_count = existing_count + new_count
             existing_component["part_info"]["count"] = updated_count
             self.components[duplicate_index] = existing_component
+            result = {
+                "duplicate": True,
+                "component": existing_component,
+                "location": str(existing_component.get("part_info", {}).get("location", "N/A")),
+                "previous_count": existing_count,
+                "new_count": updated_count,
+            }
         else:
             # Insert new component at the beginning of the list
             self.components.insert(0, component)
+            result = {
+                "duplicate": False,
+                "component": component,
+                "location": str(component.get("part_info", {}).get("location", "N/A")),
+                "previous_count": None,
+                "new_count": new_count,
+            }
 
         self.save_components()
+        return result
 
     def get_all_components(self):
         return self.components
