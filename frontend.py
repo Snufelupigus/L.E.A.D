@@ -1,5 +1,5 @@
 from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QKeySequence, QPalette, QPen, QShortcut
+from PyQt6.QtGui import QColor, QKeySequence, QPalette, QPen, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -37,6 +37,7 @@ import os
 import subprocess
 import sys
 import webbrowser
+from digikey_api_local import Digikey_API_Call
 from file_initializer import FileInitializer
 from image_cache import ImageCache
 
@@ -440,6 +441,11 @@ class MainWindow(QMainWindow):
                 border: 1px solid #d9dde3;
                 border-radius: 6px;
             }
+            QFrame#detailsThumbCard {
+                background: white;
+                border: 1px solid #d9dde3;
+                border-radius: 6px;
+            }
             QLabel#detailsEyebrow {
                 color: #5d6a75;
                 font-size: 12px;
@@ -453,6 +459,16 @@ class MainWindow(QMainWindow):
             QLabel#detailsSubline {
                 color: #5d6a75;
                 font-size: 13px;
+            }
+            QLabel#detailsImageLabel {
+                background: #f7f8fa;
+                border: 1px solid #e1e5ea;
+                border-radius: 6px;
+                color: #5d6a75;
+            }
+            QLabel#detailsImageHint {
+                color: #5d6a75;
+                font-size: 11px;
             }
             QLabel#detailsStatLabel {
                 color: #5d6a75;
@@ -610,7 +626,7 @@ class MainWindow(QMainWindow):
         if not component:
             return
 
-        dialog = ComponentDetailsDialog(component, self.backend, self)
+        dialog = ComponentDetailsDialog(component, self.backend, self.digikey_api, self)
         dialog.saved.connect(self.refresh_all_pages)
         dialog.exec()
 
@@ -758,7 +774,7 @@ class HomePage(QWidget):
         low_stock_actions.addStretch(1)
         layout.addLayout(low_stock_actions)
 
-        self.table = ComponentTable()
+        self.table = ComponentTable(self.backend)
         layout.addWidget(self.table, 1)
 
         self.checkout_bom_button.clicked.connect(lambda: self.process_bom_file("out"))
@@ -904,7 +920,7 @@ class InventoryPage(QWidget):
         controls.addWidget(self.undo_button)
         layout.addLayout(controls)
 
-        self.table = ComponentTable()
+        self.table = ComponentTable(self.backend)
         layout.addWidget(self.table, 1)
 
         self.search_input.textChanged.connect(self.refresh)
@@ -1095,7 +1111,7 @@ class AddPartPage(QWidget):
         recent_label.setObjectName("pageTitle")
         layout.addWidget(recent_label)
 
-        self.recent_table = ComponentTable()
+        self.recent_table = ComponentTable(self.backend)
         self.recent_table.setMinimumHeight(360)
         layout.addWidget(self.recent_table, 2)
 
@@ -1406,7 +1422,7 @@ class AddPartPage(QWidget):
                 summary["invalid"].append(f"{entry['barcode'][:32]}: {exc}")
                 continue
 
-            duplicate_result = self._handle_barcode_duplicate(barcode_data, interactive=False)
+            duplicate_result = self._handle_barcode_duplicate(barcode_data, interactive=True)
             if isinstance(duplicate_result, dict) and duplicate_result.get("duplicate"):
                 summary["duplicates"] += 1
                 guidance_results.append(duplicate_result)
@@ -1515,7 +1531,9 @@ class AddPartPage(QWidget):
             response = QMessageBox.question(
                 self,
                 "Possible Duplicate",
-                f"Did you mean '{suggested_actual}' instead of '{new_raw}'?",
+                f"Did you mean '{suggested_actual}' instead of '{new_raw}'?\n\n"
+                "Yes merges into the existing part.\n"
+                "No creates a new part.",
             )
             if response == QMessageBox.StandardButton.Yes:
                 for component in existing_components:
@@ -1690,6 +1708,38 @@ class DigikeyLookupWorker(QObject):
             self.finished.emit(component, error if component is None else "")
         except Exception as exc:
             self.finished.emit(None, str(exc))
+
+
+class PartImageWorker(QObject):
+    finished = pyqtSignal(str, object, str)
+
+    def __init__(self, part_number, photo_url):
+        super().__init__()
+        self.part_number = str(part_number or "").strip()
+        self.photo_url = str(photo_url or "").strip()
+
+    def run(self):
+        try:
+            cache = ImageCache()
+            cached_entry = cache.request_entry(self.part_number) if self.part_number else None
+            if cached_entry and cached_entry.image:
+                self.finished.emit(self.part_number, cached_entry.image, "")
+                return
+
+            if not self.photo_url or self.photo_url == "N/A" or not self.part_number:
+                self.finished.emit(self.part_number, None, "")
+                return
+
+            image_client = Digikey_API_Call(show_errors=False)
+            entry = image_client.fetch_image_data(self.photo_url, self.part_number)
+            if entry and entry.image:
+                image_client.image_cache.store_entry(entry)
+                self.finished.emit(self.part_number, entry.image, "")
+                return
+
+            self.finished.emit(self.part_number, None, getattr(image_client, "last_error", ""))
+        except Exception as exc:
+            self.finished.emit(self.part_number, None, str(exc))
 
 
 class MetricCard(QFrame):
@@ -3122,9 +3172,12 @@ class ComponentDetailsDialog(QDialog):
         ("product_url", "Product URL"),
     )
 
-    def __init__(self, component, backend, parent=None):
+    THUMBNAIL_SIZE = 160
+
+    def __init__(self, component, backend, digikey_api=None, parent=None):
         super().__init__(parent)
         self.backend = backend
+        self.digikey_api = digikey_api
         self.led_controller = getattr(backend, "ledControl", None)
         self.source_component = component
         self.component = deepcopy(component)
@@ -3132,18 +3185,38 @@ class ComponentDetailsDialog(QDialog):
         self.part_info_editors = {}
         self.metadata_editors = {}
         self.highlight_location = None
+        self.image_thread = None
+        self.image_worker = None
+        self.image_request_part = ""
         self.setObjectName("detailsDialog")
 
         self.setWindowTitle("Part Details")
         self.setModal(True)
-        self.resize(860, 620)
+        self.resize(760, 560)
+        self.setMinimumSize(640, 480)
+        self.setSizeGripEnabled(True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 20)
         layout.setSpacing(16)
 
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        layout.addWidget(scroll, 1)
+
+        scroll_body = QWidget()
+        scroll_body.setObjectName("pageViewport")
+        scroll_layout = QVBoxLayout(scroll_body)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(16)
+        scroll.setWidget(scroll_body)
+
         part_info = component.get("part_info", {})
         metadata = component.get("metadata", {})
+
+        hero_row = QHBoxLayout()
+        hero_row.setSpacing(12)
 
         hero = QFrame()
         hero.setObjectName("detailsHero")
@@ -3161,7 +3234,29 @@ class ComponentDetailsDialog(QDialog):
         hero_layout.addWidget(eyebrow)
         hero_layout.addWidget(self.title_label)
         hero_layout.addWidget(self.subtitle_label)
-        layout.addWidget(hero)
+        hero_row.addWidget(hero, 1)
+
+        self.image_card = QFrame()
+        self.image_card.setObjectName("detailsThumbCard")
+        self.image_card.setFixedWidth(self.THUMBNAIL_SIZE + 28)
+        image_card_layout = QVBoxLayout(self.image_card)
+        image_card_layout.setContentsMargins(12, 12, 12, 12)
+        image_card_layout.setSpacing(8)
+
+        self.image_label = QLabel("Loading image...")
+        self.image_label.setObjectName("detailsImageLabel")
+        self.image_label.setFixedSize(self.THUMBNAIL_SIZE, self.THUMBNAIL_SIZE)
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setWordWrap(True)
+        self.image_hint = QLabel("DigiKey thumbnail")
+        self.image_hint.setObjectName("detailsImageHint")
+        self.image_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        image_card_layout.addWidget(self.image_label, 0, Qt.AlignmentFlag.AlignCenter)
+        image_card_layout.addWidget(self.image_hint)
+        hero_row.addWidget(self.image_card, 0, Qt.AlignmentFlag.AlignTop)
+
+        scroll_layout.addLayout(hero_row)
 
         stats_row = QHBoxLayout()
         stats_row.setSpacing(12)
@@ -3172,7 +3267,7 @@ class ComponentDetailsDialog(QDialog):
         stats_row.addWidget(self.count_stat)
         stats_row.addWidget(self.low_stock_stat)
         stats_row.addStretch(1)
-        layout.addLayout(stats_row)
+        scroll_layout.addLayout(stats_row)
 
         content = QGridLayout()
         content.setHorizontalSpacing(16)
@@ -3202,7 +3297,8 @@ class ComponentDetailsDialog(QDialog):
         content.addWidget(metadata_group, 0, 1)
         content.setColumnStretch(0, 1)
         content.setColumnStretch(1, 1)
-        layout.addLayout(content)
+        scroll_layout.addLayout(content)
+        scroll_layout.addStretch(1)
 
         links = QHBoxLayout()
         links.setSpacing(10)
@@ -3293,11 +3389,84 @@ class ComponentDetailsDialog(QDialog):
         self.description_value.setPlainText(str(metadata.get("description", "N/A")))
         self.refresh_link_buttons()
         self.set_edit_mode(False)
+        self.load_part_image()
         if self.highlight_button.isChecked():
             new_location = self._current_location()
             if previous_location and previous_location != new_location:
                 self._turn_off_led(previous_location)
             self._apply_led_state()
+
+    def load_part_image(self):
+        self._stop_image_thread()
+
+        part_number = str(self.component.get("part_info", {}).get("part_number", "")).strip()
+        photo_url = str(self.component.get("metadata", {}).get("photo_url", "")).strip()
+        self.image_request_part = part_number
+
+        if not part_number:
+            self._set_image_placeholder("No image")
+            return
+
+        if not photo_url or photo_url == "N/A":
+            with ImageCache() as cache:
+                cache_entry = cache.request_entry(part_number)
+            if cache_entry and cache_entry.image:
+                pixmap = QPixmap()
+                if pixmap.loadFromData(cache_entry.image):
+                    scaled = pixmap.scaled(
+                        self.THUMBNAIL_SIZE,
+                        self.THUMBNAIL_SIZE,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                    self.image_label.setPixmap(scaled)
+                    self.image_label.setText("")
+                    return
+            self._set_image_placeholder("No image")
+            return
+
+        self._set_image_placeholder("Loading image...")
+        self.image_thread = QThread(self)
+        self.image_worker = PartImageWorker(part_number, photo_url)
+        self.image_worker.moveToThread(self.image_thread)
+        self.image_thread.started.connect(self.image_worker.run)
+        self.image_worker.finished.connect(self._handle_image_loaded)
+        self.image_worker.finished.connect(self.image_thread.quit)
+        self.image_worker.finished.connect(self.image_worker.deleteLater)
+        self.image_thread.finished.connect(self.image_thread.deleteLater)
+        self.image_thread.finished.connect(self._clear_image_thread)
+        self.image_thread.start()
+
+    def _handle_image_loaded(self, part_number, image_data, error):
+        if str(part_number or "").strip() != self.image_request_part:
+            return
+        if image_data:
+            pixmap = QPixmap()
+            if pixmap.loadFromData(image_data):
+                scaled = pixmap.scaled(
+                    self.THUMBNAIL_SIZE,
+                    self.THUMBNAIL_SIZE,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                self.image_label.setPixmap(scaled)
+                self.image_label.setText("")
+                return
+        self._set_image_placeholder("No image")
+
+    def _set_image_placeholder(self, text):
+        self.image_label.setPixmap(QPixmap())
+        self.image_label.setText(text)
+
+    def _clear_image_thread(self):
+        self.image_thread = None
+        self.image_worker = None
+
+    def _stop_image_thread(self):
+        if self.image_thread is not None and self.image_thread.isRunning():
+            self.image_thread.quit()
+            self.image_thread.wait(1000)
+        self._clear_image_thread()
 
     def enter_edit_mode(self):
         self.set_edit_mode(True)
@@ -3543,10 +3712,12 @@ class ComponentDetailsDialog(QDialog):
             self.populate_from_component(self.source_component)
 
     def accept(self):
+        self._stop_image_thread()
         self._turn_off_led(self.highlight_location)
         super().accept()
 
     def reject(self):
+        self._stop_image_thread()
         self._turn_off_led(self.highlight_location)
         super().reject()
 
@@ -3557,6 +3728,7 @@ class ComponentTable(QTableWidget):
     COLUMNS = (
         "Part Number",
         "Manufacturer Number",
+        "Value",
         "Location",
         "Count",
         "Type",
@@ -3564,8 +3736,9 @@ class ComponentTable(QTableWidget):
         "In Use",
     )
 
-    def __init__(self):
+    def __init__(self, backend=None):
         super().__init__(0, len(self.COLUMNS))
+        self._backend_ref = backend
         self.setHorizontalHeaderLabels(self.COLUMNS)
         self.setAlternatingRowColors(True)
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -3589,7 +3762,8 @@ class ComponentTable(QTableWidget):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
 
     def set_components(self, components):
         self.setSortingEnabled(False)
@@ -3601,6 +3775,7 @@ class ComponentTable(QTableWidget):
             values = (
                 part_info.get("part_number", "N/A"),
                 part_info.get("manufacturer_number", "N/A"),
+                self._component_value(component),
                 part_info.get("location", "N/A"),
                 part_info.get("count", "N/A"),
                 part_info.get("type", "N/A"),
@@ -3611,11 +3786,17 @@ class ComponentTable(QTableWidget):
                 item = QTableWidgetItem(str(value))
                 if column == 0:
                     item.setData(Qt.ItemDataRole.UserRole, component)
-                if column == 3:
+                if column == 4:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.setItem(row, column, item)
 
         self.setSortingEnabled(True)
+
+    def _component_value(self, component):
+        backend = getattr(self, "_backend_ref", None)
+        if backend is not None and hasattr(backend, "get_component_value"):
+            return backend.get_component_value(component)
+        return "N/A"
 
     def component_for_row(self, row):
         item = self.item(row, 0)

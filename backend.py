@@ -315,10 +315,51 @@ class Backend:
                     return True
             return False
 
+        def match_component_value(component):
+            value = self.get_component_value(component).lower()
+            return bool(value and (query in value or normalized_query in value))
+
         return [
             comp for comp in self.components
-            if match_any_field(comp["part_info"]) or match_any_field(comp["metadata"])
+            if match_any_field(comp["part_info"]) or match_any_field(comp["metadata"]) or match_component_value(comp)
         ]
+
+    def get_component_value(self, component):
+        part_info = component.get("part_info", {})
+        metadata = component.get("metadata", {})
+        component_type = str(part_info.get("type", "")).strip().lower()
+
+        text_sources = [
+            str(metadata.get("description", "")),
+            str(part_info.get("manufacturer_number", "")),
+            str(part_info.get("part_number", "")),
+        ]
+        search_text = " ".join(source for source in text_sources if source and source != "N/A")
+
+        if component_type in {"capacitor", "capacitors"}:
+            match = re.search(r"(\d+(?:\.\d+)?)\s*(pF|nF|uF|µF|mF|F)\b", search_text, flags=re.IGNORECASE)
+            if match:
+                return f"{match.group(1)}{match.group(2).replace('µ', 'u').upper()}".replace("UF", "uF")
+
+        if component_type in {"resistor", "resistors"}:
+            match = re.search(
+                r"(\d+(?:\.\d+)?)\s*(mohm|mohms|ohm|ohms|kohm|kohms|megohm|megohms|[kKmM])\b",
+                search_text,
+                flags=re.IGNORECASE,
+            )
+            if match:
+                number = match.group(1)
+                unit = match.group(2).lower()
+                if unit in {"ohm", "ohms"}:
+                    return f"{number} Ohm"
+                if unit in {"kohm", "kohms", "k"}:
+                    return f"{number}k"
+                if unit in {"megohm", "megohms", "m"}:
+                    return f"{number}M"
+                if unit in {"mohm", "mohms"}:
+                    return f"{number} mOhm"
+
+        return "N/A"
 
     def edit_component(self, index, updated_component):
         if 0 <= index < len(self.components):
