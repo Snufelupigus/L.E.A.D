@@ -1,8 +1,9 @@
-from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QPalette, QPen, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -28,6 +29,7 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QStyledItemDelegate,
     QStyle,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -37,6 +39,7 @@ import os
 import subprocess
 import sys
 import webbrowser
+from catalogue_sync import GitHubCatalogueSync
 from digikey_api_local import Digikey_API_Call
 from file_initializer import FileInitializer
 from image_cache import ImageCache
@@ -107,6 +110,7 @@ class MainWindow(QMainWindow):
         self.backend = backend
         self.digikey_api = digikey_api
         self.initializer = initializer or FileInitializer()
+        self.catalogue_sync = GitHubCatalogueSync(self.initializer)
         self.test_mode = False
         self.production_data_file = backend.data_file
         self.test_data_file = self._build_test_data_file(self.production_data_file)
@@ -211,6 +215,7 @@ class MainWindow(QMainWindow):
         self.nav.setCurrentRow(0)
         self.test_mode_shortcut = QShortcut(QKeySequence("Ctrl+Alt+T"), self)
         self.test_mode_shortcut.activated.connect(self.toggle_test_mode)
+        QTimer.singleShot(0, self.show_startup_notifications)
 
         self.setStyleSheet(
             """
@@ -640,6 +645,28 @@ class MainWindow(QMainWindow):
     def open_help_dialog(self):
         HelpDialog(self).exec()
 
+    def show_startup_notifications(self):
+        config = self.initializer.load_config()
+        sync_config = config.get("WEB_SYNC", {})
+        error_message = str(sync_config.get("LAST_PUSH_ERROR", "")).strip()
+        if not error_message:
+            return
+
+        export_path = str(sync_config.get("LAST_PUSH_ERROR_PATH", "")).strip()
+        error_time = str(sync_config.get("LAST_PUSH_ERROR_AT", "")).strip()
+        details = [error_message]
+        if error_time:
+            details.append(f"Attempted on: {error_time}")
+        if export_path:
+            details.append(f"Saved export: {export_path}")
+        QMessageBox.warning(
+            self,
+            "Website Sync Failed",
+            "The catalogue could not be uploaded to the website repository during the last shutdown.\n\n"
+            + "\n".join(details),
+        )
+        self.initializer.clear_sync_error()
+
     def undo_last_deletion(self):
         if self.backend.undo_delete():
             self.refresh_all_pages()
@@ -682,6 +709,37 @@ class MainWindow(QMainWindow):
         self.refresh_all_pages()
         self._update_test_mode_ui()
         QMessageBox.information(self, "Test Mode", message)
+
+    def closeEvent(self, event):
+        try:
+            self._sync_catalogue_on_close()
+        except Exception:
+            pass
+        super().closeEvent(event)
+
+    def _sync_catalogue_on_close(self):
+        if self.test_mode:
+            return
+
+        try:
+            result = self.catalogue_sync.sync_if_enabled()
+            if not result.get("attempted"):
+                return
+            if result.get("updated"):
+                self.initializer.record_sync_result("Uploaded successfully.")
+            else:
+                self.initializer.record_sync_result("Checked successfully. No changes were needed.")
+            self.initializer.clear_sync_error()
+        except Exception as exc:
+            catalogue_path = self.initializer.resolve_file_path(
+                self.initializer.load_config().get("FILES", {}).get("COMPONENT_CATALOGUE", ""),
+                "COMPONENT_CATALOGUE",
+            )
+            try:
+                export_path = self.catalogue_sync.save_failed_export(catalogue_path)
+            except Exception:
+                export_path = ""
+            self.initializer.record_sync_error(str(exc), export_path)
 
     def _update_test_mode_ui(self):
         self.test_mode_badge.setVisible(self.test_mode)
@@ -2010,6 +2068,14 @@ class AvailabilityManagerDialog(QDialog):
 class SettingsDialog(QDialog):
     config_saved = pyqtSignal()
     availability_changed = pyqtSignal()
+    WEB_SYNC_FIELDS = (
+        ("GITHUB_OWNER", "GitHub Username"),
+        ("REPOSITORY", "Repository Name"),
+        ("BRANCH", "Branch"),
+        ("TARGET_PATH", "Repository File Path"),
+        ("ACCESS_TOKEN", "GitHub Access Token"),
+        ("COMMIT_MESSAGE", "Commit Message"),
+    )
 
     FIELD_GROUPS = (
         (
@@ -2037,13 +2103,27 @@ class SettingsDialog(QDialog):
             ),
         ),
     )
+    WEB_SYNC_TOOLTIPS = {
+        "REPOSITORY": (
+            "Enter either just the repository name, such as borealislab.github.io, "
+            "with the GitHub Username field filled out, or enter OWNER/REPO, "
+            "or paste the full https://github.com/OWNER/REPO URL."
+        ),
+        "ACCESS_TOKEN": (
+            "Create a GitHub personal access token in GitHub: "
+            "Profile photo > Settings > Developer settings > Personal access tokens. "
+            "Create a token with repository contents write access, then paste it here."
+        ),
+    }
 
     def __init__(self, initializer, backend, digikey_api=None, parent=None):
         super().__init__(parent)
         self.initializer = initializer
         self.backend = backend
         self.digikey_api = digikey_api
+        self.catalogue_sync = GitHubCatalogueSync(self.initializer)
         self.inputs = {}
+        self.token_visibility_buttons = {}
 
         self.setObjectName("settingsDialog")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -2100,6 +2180,60 @@ class SettingsDialog(QDialog):
 
             form_stack.addWidget(group)
 
+        self.web_sync_checkbox = QCheckBox("Publish component catalogue to a GitHub website repository on close")
+        enabled = self._is_truthy(config.get("WEB_SYNC", {}).get("ENABLED", False))
+        self.web_sync_checkbox.setChecked(enabled)
+        self.web_sync_checkbox.toggled.connect(self.update_web_sync_visibility)
+        form_stack.addWidget(self.web_sync_checkbox)
+
+        self.web_sync_group = QGroupBox("Website Catalogue Sync")
+        web_sync_form = QFormLayout(self.web_sync_group)
+        web_sync_form.setContentsMargins(12, 12, 12, 12)
+        web_sync_form.setSpacing(10)
+        for key, label in self.WEB_SYNC_FIELDS:
+            editor = QLineEdit()
+            editor.setText(str(config.get("WEB_SYNC", {}).get(key, "")))
+            if "TOKEN" in key:
+                editor.setEchoMode(QLineEdit.EchoMode.Password)
+            tooltip = self.WEB_SYNC_TOOLTIPS.get(key, "")
+            if tooltip:
+                editor.setToolTip(tooltip)
+            self.inputs[("WEB_SYNC", key)] = editor
+            label_widget = QLabel(label)
+            if tooltip:
+                label_widget.setToolTip(tooltip)
+            if key == "ACCESS_TOKEN":
+                token_row = QWidget()
+                token_layout = QHBoxLayout(token_row)
+                token_layout.setContentsMargins(0, 0, 0, 0)
+                token_layout.setSpacing(8)
+                toggle_button = QToolButton()
+                toggle_button.setCheckable(True)
+                toggle_button.setAutoRaise(False)
+                toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
+                self._update_token_visibility_button(toggle_button, False)
+                toggle_button.clicked.connect(
+                    lambda checked=False, token_key=key: self.toggle_token_visibility(token_key, checked)
+                )
+                token_layout.addWidget(editor, 1)
+                token_layout.addWidget(toggle_button, 0)
+                self.token_visibility_buttons[key] = toggle_button
+                web_sync_form.addRow(label_widget, token_row)
+            else:
+                web_sync_form.addRow(label_widget, editor)
+
+        self.web_sync_status_label = QLabel("")
+        self.web_sync_status_label.setWordWrap(True)
+        self.web_sync_status_label.setObjectName("barcodeHint")
+        web_sync_form.addRow(QLabel("Last Sync Status"), self.web_sync_status_label)
+
+        self.test_sync_button = QPushButton("Test Website Sync")
+        self.test_sync_button.clicked.connect(self.run_web_sync_test)
+        web_sync_form.addRow(QLabel(""), self.test_sync_button)
+        form_stack.addWidget(self.web_sync_group)
+        self.update_web_sync_visibility(enabled)
+        self.refresh_web_sync_status()
+
         form_stack.addStretch(1)
 
         actions = QHBoxLayout()
@@ -2125,8 +2259,9 @@ class SettingsDialog(QDialog):
         for (section, key), editor in self.inputs.items():
             value = editor.text().strip()
             config.setdefault(section, {})[key] = value
+        config.setdefault("WEB_SYNC", {})["ENABLED"] = self.web_sync_checkbox.isChecked()
 
-        if not self._validate_numeric(config):
+        if not self._validate_numeric(config) or not self._validate_web_sync(config):
             return
 
         self.initializer.save_config(config)
@@ -2154,6 +2289,92 @@ class SettingsDialog(QDialog):
                 QMessageBox.warning(self, "Invalid LED Count", "LED Count must be greater than zero.")
                 return False
         return True
+
+    def _validate_web_sync(self, config):
+        sync_config = config.get("WEB_SYNC", {})
+        if not self._is_truthy(sync_config.get("ENABLED", False)):
+            return True
+
+        required = (
+            ("GITHUB_OWNER", "GitHub Username"),
+            ("REPOSITORY", "Repository Name"),
+            ("BRANCH", "Branch"),
+            ("TARGET_PATH", "Repository File Path"),
+            ("ACCESS_TOKEN", "GitHub Access Token"),
+        )
+        missing = [label for key, label in required if not str(sync_config.get(key, "")).strip()]
+        if missing:
+            QMessageBox.warning(
+                self,
+                "Missing Website Sync Settings",
+                "Website sync is enabled but these fields are blank:\n- " + "\n- ".join(missing),
+            )
+            return False
+        return True
+
+    def update_web_sync_visibility(self, enabled):
+        self.web_sync_group.setVisible(bool(enabled))
+        self.test_sync_button.setVisible(bool(enabled))
+
+    def _is_truthy(self, value):
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    def refresh_web_sync_status(self):
+        sync_config = self.initializer.load_config().get("WEB_SYNC", {})
+        status = str(sync_config.get("LAST_SYNC_STATUS", "")).strip()
+        sync_time = str(sync_config.get("LAST_SYNC_AT", "")).strip()
+        if status and sync_time:
+            self.web_sync_status_label.setText(f"{status}\n{sync_time}")
+        elif status:
+            self.web_sync_status_label.setText(status)
+        else:
+            self.web_sync_status_label.setText("No sync attempts recorded yet.")
+
+    def toggle_token_visibility(self, key, checked):
+        editor = self.inputs.get(("WEB_SYNC", key))
+        button = self.token_visibility_buttons.get(key)
+        if editor is None or button is None:
+            return
+        editor.setEchoMode(QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password)
+        self._update_token_visibility_button(button, checked)
+
+    def _update_token_visibility_button(self, button, visible):
+        button.setText("Hide" if visible else "Show")
+        button.setToolTip("Hide token" if visible else "Show token")
+
+    def run_web_sync_test(self):
+        config = self.initializer.load_config()
+        for (section, key), editor in self.inputs.items():
+            value = editor.text().strip()
+            config.setdefault(section, {})[key] = value
+        config.setdefault("WEB_SYNC", {})["ENABLED"] = self.web_sync_checkbox.isChecked()
+
+        if not self._validate_numeric(config) or not self._validate_web_sync(config):
+            return
+
+        self.initializer.save_config(config)
+        try:
+            result = self.catalogue_sync.sync_if_enabled()
+            if not result.get("attempted"):
+                status_message = "Website sync is disabled."
+                self.initializer.record_sync_result(status_message)
+                QMessageBox.information(self, "Website Sync", status_message)
+            elif result.get("updated"):
+                status_message = "Uploaded successfully."
+                self.initializer.record_sync_result(status_message)
+                self.initializer.clear_sync_error()
+                QMessageBox.information(self, "Website Sync", "Catalogue upload succeeded.")
+            else:
+                status_message = "Checked successfully. No changes were needed."
+                self.initializer.record_sync_result(status_message)
+                self.initializer.clear_sync_error()
+                QMessageBox.information(self, "Website Sync", "Sync check succeeded. The remote catalogue is already up to date.")
+        except Exception as exc:
+            self.initializer.record_sync_error(str(exc), "")
+            QMessageBox.warning(self, "Website Sync Failed", str(exc))
+        self.refresh_web_sync_status()
 
     def _apply_runtime_settings(self, config):
         files_config = config.get("FILES", {})

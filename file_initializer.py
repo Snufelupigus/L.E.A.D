@@ -2,6 +2,7 @@ import os
 import json
 import sqlite3
 import logging
+import datetime
 
 
 logger = logging.getLogger(__name__)
@@ -11,6 +12,20 @@ class FileInitializer:
         "API": {
             "DIGIKEY_CLIENT_ID": "",
             "DIGIKEY_CLIENT_SECRET": "",
+        },
+        "WEB_SYNC": {
+            "ENABLED": False,
+            "GITHUB_OWNER": "",
+            "REPOSITORY": "",
+            "BRANCH": "main",
+            "TARGET_PATH": "component_catalogue.json",
+            "ACCESS_TOKEN": "",
+            "COMMIT_MESSAGE": "Update component catalogue from L.E.A.D. desktop app",
+            "LAST_SYNC_STATUS": "",
+            "LAST_SYNC_AT": "",
+            "LAST_PUSH_ERROR": "",
+            "LAST_PUSH_ERROR_PATH": "",
+            "LAST_PUSH_ERROR_AT": "",
         },
         "SERIAL": {
             "PORT": "",
@@ -77,6 +92,37 @@ class FileInitializer:
         normalized = self._normalize_config(self._merge_dicts(self.DEFAULT_CONFIG, config or {}))
         with open(self.config_path, "w") as file:
             json.dump(normalized, file, indent=4)
+
+    def record_sync_error(self, message, export_path):
+        config = self.load_config()
+        sync_config = dict(config.get("WEB_SYNC", {}))
+        sync_config["LAST_SYNC_STATUS"] = f"Failed: {str(message or '').strip()}"
+        sync_config["LAST_SYNC_AT"] = datetime.datetime.now().isoformat(timespec="seconds")
+        sync_config["LAST_PUSH_ERROR"] = str(message or "").strip()
+        sync_config["LAST_PUSH_ERROR_PATH"] = str(export_path or "").strip()
+        sync_config["LAST_PUSH_ERROR_AT"] = datetime.datetime.now().isoformat(timespec="seconds")
+        config["WEB_SYNC"] = sync_config
+        self.save_config(config)
+
+    def record_sync_result(self, status_message):
+        config = self.load_config()
+        sync_config = dict(config.get("WEB_SYNC", {}))
+        sync_config["LAST_SYNC_STATUS"] = str(status_message or "").strip()
+        sync_config["LAST_SYNC_AT"] = datetime.datetime.now().isoformat(timespec="seconds")
+        config["WEB_SYNC"] = sync_config
+        self.save_config(config)
+
+    def clear_sync_error(self):
+        config = self.load_config()
+        sync_config = dict(config.get("WEB_SYNC", {}))
+        changed = False
+        for key in ("LAST_PUSH_ERROR", "LAST_PUSH_ERROR_PATH", "LAST_PUSH_ERROR_AT"):
+            if sync_config.get(key):
+                sync_config[key] = ""
+                changed = True
+        if changed:
+            config["WEB_SYNC"] = sync_config
+            self.save_config(config)
 
     def ensure_runtime_files(self):
         config = self.load_config()
